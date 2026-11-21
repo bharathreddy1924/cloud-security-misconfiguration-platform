@@ -11,15 +11,15 @@ pipeline {
     }
 
     stage('Install Dependencies') {
-      steps { sh 'npm install --no-audit --no-fund' }
+      steps { bat 'npm ci --no-audit --no-fund' }
     }
 
     stage('Unit Tests') {
-      steps { sh 'npm test' }
+      steps { bat 'npm test' }
     }
 
     stage('Build Docker Image') {
-      steps { sh 'docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} .' }
+      steps { bat "docker build -t %IMAGE_NAME%:%BUILD_NUMBER% ." }
     }
   }
 
