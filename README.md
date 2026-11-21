@@ -194,6 +194,8 @@ docker-compose down -v
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/health` | `GET` | Service health status, database state, and OAuth configuration flag. |
+| `/api-docs` | `GET` | Interactive Swagger UI documentation (publicly accessible). |
+| `/api-docs.json` | `GET` | Raw OpenAPI 3.0 specification in JSON format. |
 | `/login` | `GET` | Serves the professional sign-in page with Continue with Google. |
 | `/auth/google` | `GET` | Generates CSRF state and redirects user to Google OAuth consent page. |
 | `/auth/google/callback` | `GET` | Receives authorization code, validates state token, exchanges code for tokens, verifies profile, and creates session. |
@@ -228,7 +230,63 @@ docker-compose down -v
 
 ---
 
-## 8. Security Rules
+## 8. Swagger / OpenAPI Documentation
+
+### What is Swagger / OpenAPI?
+Swagger (OpenAPI 3.0) provides interactive, human-readable, and machine-verifiable documentation for all production endpoints on the Cloud Security Misconfiguration Detection Platform. It enables developers, auditors, and evaluators to inspect request schemas, parameter constraints, response models, and security schemes in real-time directly from a web browser.
+
+### How to Start the Application
+- **Standalone Node.js:**
+  ```bash
+  npm start
+  ```
+  The server listens on `http://localhost:3000`.
+
+- **Docker Compose:**
+  ```bash
+  docker-compose up --build -d
+  ```
+  The application is mapped to host port `3001` (`http://localhost:3001`).
+
+### How to Access Swagger UI
+- **Interactive Swagger UI:**
+  - Standalone Node: [http://localhost:3000/api-docs](http://localhost:3000/api-docs)
+  - Docker Compose: [http://localhost:3001/api-docs](http://localhost:3001/api-docs)
+- **OpenAPI 3.0 JSON Specification:**
+  - Standalone Node: [http://localhost:3000/api-docs.json](http://localhost:3000/api-docs.json)
+  - Docker Compose: [http://localhost:3001/api-docs.json](http://localhost:3001/api-docs.json)
+
+> **Note:** The Swagger UI documentation is **publicly accessible** without logging in. You can browse all endpoint schemas and data models freely.
+
+### How to Explore Endpoints
+Endpoints in the Swagger UI are organized by functional tags:
+1. **System:**
+   - `GET /api/health` — Verifies operational state, MongoDB connection status, and Google OAuth configuration status.
+2. **Authentication:**
+   - `GET /api/auth/me` — Inspects the currently authenticated user's session profile.
+   - `GET /auth/google` — Details how the Google OAuth 2.0 authorization flow is initiated with CSRF state protection.
+   - `GET /auth/google/callback` — Documents the callback parameters (`code`, `state`, `error`) and session establishment.
+   - `GET /auth/logout` & `POST /auth/logout` — Documents session destruction and cookie clearance.
+3. **Scanner:**
+   - `POST /api/scan` — Comprehensive specification of the scan request payload (1 to 500 cloud resources) and all 8 security detection rules.
+   - `GET /api/scans` — Details scan history retrieval from MongoDB.
+
+### How to Use "Try it out"
+1. In Swagger UI, expand any endpoint accordion (e.g., `GET /api/health`).
+2. Click the **Try it out** button in the top right of the endpoint card.
+3. For endpoints with parameters or a request body (such as `POST /api/scan`), edit the sample JSON payload in the text area.
+4. Click **Execute**.
+5. Inspect the HTTP Response code, response headers, and JSON response body.
+
+### How Session Authentication Works in Swagger
+- The platform uses secure, server-side session management powered by `express-session` with the **`cloudsec.sid`** cookie.
+- **Browser Session Sharing:** When you log in with Google at `/login` in your browser, the `cloudsec.sid` cookie is stored in that browser session. When you then open `/api-docs` in the same browser, Swagger's "Try it out" requests automatically inherit the session cookie, allowing you to test protected endpoints like `POST /api/scan`, `GET /api/scans`, and `GET /api/auth/me` directly.
+- **Unauthenticated Protection:** If you execute `POST /api/scan` without an active session, the backend strictly rejects the request with HTTP **`401 Unauthorized`**.
+- **Manual Cookie Authorization:** You can also click the green **Authorize** padlock button at the top of Swagger UI and supply your session cookie name and value to authorize requests explicitly.
+
+---
+
+## 9. Security Rules
 
 | Rule ID | Severity | Detection Logic | Recommended Remediation |
 |---|---|---|---|
@@ -243,9 +301,9 @@ docker-compose down -v
 
 ---
 
-## 9. Automated Testing
+## 10. Automated Testing
 
-The test suite uses the Node.js built-in test runner (`node --test`) and includes 28 automated tests across 4 test suites:
+The test suite uses the Node.js built-in test runner (`node --test`) and includes **35 automated tests** across **5 test suites**:
 
 ```bash
 npm test
@@ -282,10 +340,18 @@ npm test
   - Verified persistence of scan assessments to the MongoDB `scans` collection.
   - Verified scan history query via `GET /api/scans` for authenticated Google users.
   - Verified user attribution (`userEmail` and `userId`) recorded on persisted scan documents.
+- **Swagger / OpenAPI Documentation (`test/swagger.test.js`):**
+  - Public accessibility of `/api-docs` and `/api-docs/` serving Swagger UI HTML.
+  - OpenAPI 3.x schema validity via `/api-docs.json`.
+  - Comprehensive documentation coverage of all production endpoints (`/api/health`, `/api/auth/me`, `/api/scan`, `/api/scans`, `/auth/google`, `/auth/google/callback`, `/auth/logout`).
+  - Documentation of `CookieAuth` security scheme (`cloudsec.sid` session cookie).
+  - Documentation of all 8 cloud security scanning rules.
+  - Continued enforcement of authentication guards on protected endpoints.
+  - Exclusion of test-only endpoints (`/auth/test-session`) from production documentation.
 
 ---
 
-## 10. Jenkins CI Pipeline
+## 11. Jenkins CI Pipeline
 
 1. Ensure the Jenkins agent has Git, Node.js 20+, and Docker CLI/daemon access.
 2. Push this project to GitHub.
@@ -294,21 +360,21 @@ npm test
 5. Run **Build Now** and verify all stages pass:
    - `Checkout`
    - `Install Dependencies`
-   - `Unit Tests` (runs `npm test` verifying all 28 tests)
+   - `Unit Tests` (runs `npm test` verifying all 35 tests)
    - `Build Docker Image`
 
 ---
 
-## 11. Capstone Demonstration Sequence
+## 12. Capstone Demonstration Sequence
 
 1. **GitHub Evidence:** Show repository files (`server.js`, `src/auth.js`, `src/scanner.js`, `test/`, `Dockerfile`, `docker-compose.yml`, `Jenkinsfile`).
-2. **Automated Testing:** Run `npm test` to demonstrate all 28 tests passing.
+2. **Automated Testing:** Run `npm test` to demonstrate all 35 tests passing.
 3. **Application Launch:** Run `docker-compose up --build -d` (or `npm start`).
-4. **Access Control Demo:** Navigate to `http://localhost:3001` (or `3000` for standalone local node). Demonstrate automatic redirect to `/login`.
-5. **Sign-In Interface:** Present the professional dark-themed login interface with the official "Continue with Google" action.
-6. **OAuth Authentication:** Complete Google Sign-In. Show redirection to the dashboard and the user's name, email, and Google avatar rendered in the top bar.
-7. **Security Scan Execution:** Click **Run sample scan** to audit the 6 cloud resources and review the 6 detected findings across Critical, High, and Medium severities.
-8. **Audit Trail:** Show MongoDB scan history persistence linked to the authenticated user.
-9. **Sign Out:** Click **Sign out** to destroy the session and demonstrate that protected routes immediately block access until re-authentication.
-10. **CI Pipeline:** Present the successful Jenkins pipeline execution.
-Webhook test - checking automatic Jenkins build.
+4. **Interactive Swagger Documentation:** Open `http://localhost:3001/api-docs` (or `http://localhost:3000/api-docs`). Explore API endpoints, request schemas, security definitions, and Try it out.
+5. **Access Control Demo:** Navigate to `http://localhost:3001` (or `3000` for standalone local node). Demonstrate automatic redirect to `/login`.
+6. **Sign-In Interface:** Present the professional dark-themed login interface with the official "Continue with Google" action.
+7. **OAuth Authentication:** Complete Google Sign-In. Show redirection to the dashboard and the user's name, email, and Google avatar rendered in the top bar.
+8. **Security Scan Execution:** Click **Run sample scan** to audit the 6 cloud resources and review the 6 detected findings across Critical, High, and Medium severities.
+9. **Audit Trail:** Show MongoDB scan history persistence linked to the authenticated user.
+10. **Sign Out:** Click **Sign out** to destroy the session and demonstrate that protected routes immediately block access until re-authentication.
+11. **CI Pipeline:** Present the successful Jenkins pipeline execution.
