@@ -1,0 +1,104 @@
+:root{font-family:Inter,Segoe UI,Arial,sans-serif;color:#e8edf7;background:#0b1020;font-synthesis:none}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at 80% 0%,#18264b 0,transparent 38%),#0b1020;min-height:100vh}
+.topbar{height:76px;border-bottom:1px solid #26314a;display:flex;align-items:center;justify-content:space-between;padding:0 max(calc((100vw - 1080px)/2),24px);background:#0b1020cc}
+.brand{display:flex;align-items:center;gap:12px}
+.brand-mark{background:#6d7cff;color:white;font-weight:800;border-radius:11px;padding:10px}
+.brand strong{display:block;letter-spacing:.4px}
+.brand small{color:#8794ae;font-size:11px}
+.status{font-size:12px;color:#a8b5ca}
+.status i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#40d6a0;margin-right:7px}
+
+.topbar-right{display:flex;align-items:center;gap:18px}
+.user-badge{display:flex;align-items:center;gap:10px;background:#131c33;border:1px solid #2d3b59;border-radius:30px;padding:4px 14px 4px 6px}
+.user-avatar{width:28px;height:28px;border-radius:50%;border:1px solid #7482ff;object-fit:cover}
+.user-info{display:flex;flex-direction:column;line-height:1.2}
+.user-name{font-size:12px;font-weight:700;color:#e1e8f8}
+.user-email{font-size:10px;color:#8897b5}
+.logout-link{margin-left:6px;font-size:11px;color:#ff8991;text-decoration:none;padding:4px 8px;border-radius:6px;background:#2d1720;border:1px solid #572935;transition:background 0.2s}
+.logout-link:hover{background:#451c2a;color:#ffb0b6}
+
+main{max-width:1080px;margin:0 auto;padding:58px 24px}
+.eyebrow{font-size:10px;letter-spacing:2px;color:#8b9cff;font-weight:800}
+.hero h1{font-size:clamp(38px,6vw,62px);line-height:1.04;letter-spacing:-2px;margin:15px 0}
+.hero h1 span{color:#8290ff}
+.intro,.muted{color:#9aa8c0;line-height:1.7;max-width:650px}
+.actions{display:flex;align-items:center;gap:12px;margin-top:24px;flex-wrap:wrap}
+button{border:0;border-radius:8px;padding:12px 18px;font-weight:700;cursor:pointer}
+.primary{background:#7482ff;color:white}
+.primary:hover{background:#8995ff}
+.secondary{background:#1b2740;color:#c8d2e5;border:1px solid #34415e}
+
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:38px 0}
+.metrics article,.panel{background:#121b30;border:1px solid #263653;border-radius:13px;padding:20px}
+.metrics small{display:block;color:#93a1ba;font-size:12px}
+.metrics strong{display:block;font-size:30px;margin-top:8px}
+.critical{color:#ff747d}
+.high{color:#ffb46b}
+.panel{margin:18px 0 22px}
+.panel-head{display:flex;align-items:center;justify-content:space-between}
+.panel-head h2{font-size:20px;margin:7px 0}
+.tag{font-size:10px;color:#aebaff;border:1px solid #4655a1;padding:6px 9px;border-radius:30px}
+
+textarea{width:100%;min-height:190px;resize:vertical;background:#0b1223;border:1px solid #34415e;border-radius:8px;color:#cce1ff;padding:15px;font:13px/1.6 Consolas,monospace;outline:none}
+textarea:focus{border-color:#7482ff}
+code{color:#c1caff}
+#message{font-size:12px;color:#aebaff}
+.empty{padding:30px 10px;text-align:center;color:#7887a2}
+
+.finding{padding:16px 0;border-top:1px solid #293650}
+.finding:first-child{border-top:0}
+.finding-top{display:flex;justify-content:space-between;gap:12px}
+.finding h3{font-size:15px;margin:0 0 7px}
+.finding p{font-size:13px;line-height:1.5;color:#9eacc4;margin:5px 0}
+.severity{font-size:10px;font-weight:800;letter-spacing:.7px;padding:5px 8px;border-radius:5px;height:max-content}
+.sev-CRITICAL{background:#51232d;color:#ff8991}
+.sev-HIGH{background:#4b3421;color:#ffc27f}
+.sev-MEDIUM{background:#403b20;color:#e9d77a}
+.sev-LOW{background:#1e3e3a;color:#83dfc1}
+footer{text-align:center;color:#697895;font-size:11px;padding:28px 0}
+
+/* Login Page Styling */
+.auth-main{max-width:680px;margin:0 auto;padding:48px 20px}
+.login-container{display:flex;justify-content:center;margin-top:12px}
+.login-card{width:100%;background:#121b30;border:1px solid #283756;border-radius:18px;padding:36px;box-shadow:0 18px 48px rgba(0,0,0,0.45)}
+.shield-icon{display:inline-flex;padding:12px;background:#182442;border:1px solid #32436d;border-radius:14px;margin-bottom:14px}
+.login-header h1{font-size:32px;letter-spacing:-1px;margin:10px 0 8px}
+
+.alert-box{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-radius:10px;margin:20px 0;font-size:13px;line-height:1.5}
+.alert-error{background:#38161f;border:1px solid #732a3b;color:#ffb0b6}
+.alert-info{background:#15223c;border:1px solid #2d4575;color:#b6caff}
+.alert-icon{font-size:18px;line-height:1}
+.alert-text strong{display:block;margin-bottom:2px}
+.alert-text p{margin:0}
+
+.oauth-section{margin:28px 0 20px;display:flex;flex-direction:column;align-items:center}
+.google-btn{display:inline-flex;align-items:center;justify-content:center;gap:12px;width:100%;max-width:360px;background:#ffffff;color:#3c4043;font-family:inherit;font-weight:600;font-size:15px;padding:12px 20px;border-radius:10px;text-decoration:none;border:1px solid #dadce0;box-shadow:0 2px 8px rgba(0,0,0,0.25);transition:background 0.2s,box-shadow 0.2s}
+.google-btn:hover{background:#f8faff;box-shadow:0 4px 14px rgba(0,0,0,0.35)}
+.google-svg{flex-shrink:0}
+
+.security-badges{display:flex;justify-content:center;gap:16px;font-size:11px;color:#7e8ea8;margin-bottom:26px;flex-wrap:wrap}
+.security-badges span{background:#0e1628;border:1px solid #202d49;padding:5px 10px;border-radius:20px}
+
+.platform-features{border-top:1px solid #222f4b;padding-top:20px;margin-top:10px;display:flex;flex-direction:column;gap:12px}
+.feature-item{display:flex;gap:10px;font-size:13px;line-height:1.5;color:#94a3bc}
+.feature-item strong{color:#d5e0f5}
+.feature-bullet{color:#40d6a0;font-weight:bold}
+
+.setup-details{margin-top:24px;border:1px solid #263653;border-radius:10px;background:#0d1425;padding:12px 16px;font-size:12px;color:#8e9db7}
+.setup-details summary{font-weight:700;color:#9cb1d9;cursor:pointer;outline:none}
+.setup-body{margin-top:12px;line-height:1.6}
+.setup-body ol{padding-left:18px;margin:8px 0}
+.setup-body li{margin-bottom:6px}
+.setup-body a{color:#8290ff;text-decoration:none}
+.setup-body a:hover{text-decoration:underline}
+
+@media(max-width:650px){
+  .metrics{grid-template-columns:repeat(2,1fr)}
+  main{padding-top:38px}
+  .topbar{padding:0 18px}
+  .status{font-size:10px}
+  .topbar-right{gap:10px}
+  .user-email{display:none}
+  .login-card{padding:24px 18px}
+}

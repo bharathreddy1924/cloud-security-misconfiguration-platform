@@ -1,0 +1,10 @@
+{
+  "resources": [
+    { "id": "bucket-customer-uploads", "type": "s3", "publicAccess": true, "encryptionEnabled": false },
+    { "id": "sg-admin-access", "type": "security-group", "ingress": [{ "port": 22, "cidr": "0.0.0.0/0" }] },
+    { "id": "iam-developer-policy", "type": "iam-policy", "action": "*", "resource": "*" },
+    { "id": "prod-reporting-db", "type": "database", "publiclyAccessible": true },
+    { "id": "audit-trail-main", "type": "cloudtrail", "enabled": false },
+    { "id": "encrypted-volume-01", "type": "ebs", "encrypted": true }
+  ]
+}

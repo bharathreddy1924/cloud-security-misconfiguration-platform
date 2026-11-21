@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CloudSec | Misconfiguration Detection</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">CS</span>
+      <div>
+        <strong>CloudSec</strong>
+        <small>Security Posture Monitor</small>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="status"><i></i> Engine ready</span>
+      <div id="userProfile" class="user-badge" style="display: none;">
+        <img id="userAvatar" class="user-avatar" src="" alt="Google Avatar" style="display: none;">
+        <div class="user-info">
+          <span id="userName" class="user-name">Auditor</span>
+          <span id="userEmail" class="user-email"></span>
+        </div>
+        <a href="/auth/logout" class="logout-link" title="Sign out of CloudSec">Sign out</a>
+      </div>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">CLOUD SECURITY • CONFIGURATION AUDIT</p>
+      <h1>Find misconfigurations<br><span>before attackers do.</span></h1>
+      <p class="intro">Run a rule-based security assessment against cloud resource configuration data and get actionable remediation guidance.</p>
+      <div class="actions"><button id="sampleBtn" class="primary">Run sample scan</button><button id="clearBtn" class="secondary">Clear results</button></div>
+    </section>
+    <section class="metrics">
+      <article><small>Resources scanned</small><strong id="resourceCount">0</strong></article>
+      <article><small>Total findings</small><strong id="findingCount">0</strong></article>
+      <article><small>Critical</small><strong id="criticalCount" class="critical">0</strong></article>
+      <article><small>High</small><strong id="highCount" class="high">0</strong></article>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">ASSESSMENT INPUT</p><h2>Scan resource inventory</h2></div><span class="tag">JSON</span></div>
+      <p class="muted">Paste a JSON object containing a <code>resources</code> array. The sample button loads safe demonstration data.</p>
+      <textarea id="payload" spellcheck="false" aria-label="Resource JSON input"></textarea>
+      <div class="actions"><button id="scanBtn" class="primary">Analyse configuration</button><span id="message" role="status"></span></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><div><p class="eyebrow">SECURITY POSTURE</p><h2>Detection findings</h2></div><span id="resultTag" class="tag">No scan yet</span></div>
+      <div id="findings" class="empty">Run a scan to view detected risks and remediation steps.</div>
+    </section>
+    <footer>Academic capstone prototype • Rule-based checks • No live cloud credentials required</footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

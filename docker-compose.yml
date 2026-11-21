@@ -1,0 +1,34 @@
+services:
+  app:
+    build: .
+    container_name: cloudsec-platform
+    ports:
+      - "3001:3000"
+    environment:
+      PORT: 3000
+      MONGODB_URI: mongodb://mongo:27017/cloudsec
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:3001/auth/google/callback}
+      SESSION_SECRET: ${SESSION_SECRET:-cloudsec-docker-session-secret-change-in-production}
+      NODE_ENV: production
+      COOKIE_SECURE: "false"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    container_name: cloudsec-mongodb
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
