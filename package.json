@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:e2e": "node --test e2e/login.e2e.js"
   },
   "engines": {
     "node": ">=20"
@@ -18,5 +19,11 @@
     "mongoose": "^8.9.5",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "selenium-webdriver": "^4.51.0"
+  },
+  "overrides": {
+    "glob": "14.0.3"
   }
 }

@@ -349,6 +349,23 @@ npm test
   - Continued enforcement of authentication guards on protected endpoints.
   - Exclusion of test-only endpoints (`/auth/test-session`) from production documentation.
 
+### Browser Automation & End-to-End Testing (Selenium WebDriver)
+
+Browser-level end-to-end (E2E) tests are located in the `e2e/` directory and use **Selenium WebDriver** (`selenium-webdriver`) with headless Google Chrome and automatic ChromeDriver lifecycle management via **Selenium Manager**:
+
+```bash
+# Run Selenium browser E2E test suite
+npm run test:e2e
+```
+
+#### E2E Test Coverage (`e2e/login.e2e.js`):
+1. **Login Page Load:** Opens the login page in a fresh Chrome browser session and verifies document title (`CloudSec | Sign In`), card heading, defensive platform branding, and URL structure.
+2. **Continue with Google Button Verification:** Locates `#googleBtn`, validates that the button is rendered and visible on screen, verifies the button label, checks `role="button"`, and confirms the button links directly to `/auth/google`.
+3. **Route Protection & Redirection:** Navigates directly to the dashboard root (`/`) without an active session and confirms Chrome is automatically redirected to `/login`.
+4. **Security Badges & Highlights:** Validates the presence of the OAuth 2.0 protocol badge, CSRF State Protection badge, and HttpOnly Session indicator.
+5. **Session Lifecycle & Cleanup:** Automatically invokes `driver.quit()` in `finally` blocks for every test to guarantee clean browser teardown without leaving orphaned processes.
+6. **Smart Target Detection:** Automatically targets the live Docker Compose application on port `3001`, a standalone Node server on port `3000`, a custom `APP_URL`, or spins up an ephemeral local server instance if no external service is active.
+
 ---
 
 ## 11. Jenkins CI Pipeline
@@ -378,3 +395,4 @@ npm test
 9. **Audit Trail:** Show MongoDB scan history persistence linked to the authenticated user.
 10. **Sign Out:** Click **Sign out** to destroy the session and demonstrate that protected routes immediately block access until re-authentication.
 11. **CI Pipeline:** Present the successful Jenkins pipeline execution.
+12. **Selenium Browser E2E Testing:** Run `npm run test:e2e` to demonstrate automated browser testing validating login page components, Google OAuth route linkage, and route guards.

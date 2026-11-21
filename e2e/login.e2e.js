@@ -1,0 +1,184 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const http = require('http');
+const { Builder, By, until } = require('selenium-webdriver');
+const chrome = require('selenium-webdriver/chrome');
+
+// Configuration
+const DEFAULT_PORT = 3001;
+let baseUrl = process.env.APP_URL || process.env.BASE_URL || `http://localhost:${DEFAULT_PORT}`;
+let localServer = null;
+
+/**
+ * Creates a fresh Chrome WebDriver instance using Selenium Manager.
+ * Configured with headless mode and required flags for container and CI compatibility.
+ */
+async function createDriver() {
+  const options = new chrome.Options();
+  options.addArguments('--headless=new');
+  options.addArguments('--no-sandbox');
+  options.addArguments('--disable-dev-shm-usage');
+  options.addArguments('--disable-gpu');
+  options.addArguments('--window-size=1280,800');
+
+  const driver = await new Builder()
+    .forBrowser('chrome')
+    .setChromeOptions(options)
+    .build();
+
+  // Set implicit wait timeout
+  await driver.manage().setTimeouts({ implicit: 5000 });
+  return driver;
+}
+
+test.before(async () => {
+  // Check if live application (e.g. Docker Compose on port 3001 or standalone on 3000) is reachable
+  let serverReachable = false;
+  const candidateUrls = [baseUrl, 'http://localhost:3001', 'http://localhost:3000'];
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1500) });
+      if (res.ok) {
+        baseUrl = url;
+        serverReachable = true;
+        break;
+      }
+    } catch (_) {}
+  }
+
+  // If no external server is running, spin up an ephemeral local Express instance
+  if (!serverReachable) {
+    const app = require('../server');
+    localServer = http.createServer(app);
+    await new Promise((resolve) => localServer.listen(0, '127.0.0.1', resolve));
+    const port = localServer.address().port;
+    baseUrl = `http://127.0.0.1:${port}`;
+  }
+});
+
+test.after(async () => {
+  if (localServer) {
+    await new Promise((resolve) => localServer.close(resolve));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Selenium Browser Automation (E2E) Test Suite
+// ---------------------------------------------------------------------------
+
+test('Login page loads successfully in a fresh browser session', async () => {
+  let driver;
+  try {
+    driver = await createDriver();
+    await driver.get(`${baseUrl}/login`);
+
+    // Verify page title
+    const title = await driver.getTitle();
+    assert.ok(title.includes('CloudSec'), `Title should contain CloudSec, got "${title}"`);
+    assert.ok(title.includes('Sign In'), `Title should contain Sign In, got "${title}"`);
+
+    // Verify main card heading
+    const heading = await driver.findElement(By.css('h1'));
+    const headingText = await heading.getText();
+    assert.equal(headingText, 'Sign in to CloudSec');
+
+    // Verify defensive platform eyebrow label
+    const eyebrow = await driver.findElement(By.css('.eyebrow'));
+    const eyebrowText = await eyebrow.getText();
+    assert.ok(eyebrowText.includes('DEFENSIVE CLOUD SECURITY PLATFORM'));
+
+    // Verify current URL
+    const currentUrl = await driver.getCurrentUrl();
+    assert.ok(currentUrl.includes('/login'), `URL should contain /login, got "${currentUrl}"`);
+  } finally {
+    if (driver) {
+      await driver.quit();
+    }
+  }
+});
+
+test('Continue with Google button is visible, displayed, and points to /auth/google', async () => {
+  let driver;
+  try {
+    driver = await createDriver();
+    await driver.get(`${baseUrl}/login`);
+
+    // Locate the Google Sign-In button
+    const googleBtn = await driver.findElement(By.id('googleBtn'));
+    assert.ok(googleBtn, 'Google button element with id "googleBtn" must exist');
+
+    // Verify button is visible and displayed on screen
+    const isDisplayed = await googleBtn.isDisplayed();
+    assert.equal(isDisplayed, true, 'Continue with Google button must be visible');
+
+    // Verify button text
+    const btnText = await googleBtn.getText();
+    assert.ok(btnText.includes('Continue with Google'), `Button text should be "Continue with Google", got "${btnText}"`);
+
+    // Verify button points to the correct Google OAuth route
+    const href = await googleBtn.getAttribute('href');
+    assert.ok(href, 'Button must have href attribute');
+    assert.ok(href.endsWith('/auth/google'), `Button href should end with /auth/google, got "${href}"`);
+
+    // Verify accessible role and label
+    const role = await googleBtn.getAttribute('role');
+    assert.equal(role, 'button');
+    const ariaLabel = await googleBtn.getAttribute('aria-label');
+    assert.equal(ariaLabel, 'Continue with Google');
+  } finally {
+    if (driver) {
+      await driver.quit();
+    }
+  }
+});
+
+test('Unauthenticated navigation to dashboard (/) redirects browser to /login', async () => {
+  let driver;
+  try {
+    driver = await createDriver();
+
+    // Navigate to root path without session cookie
+    await driver.get(`${baseUrl}/`);
+
+    // Wait until URL redirects to /login
+    await driver.wait(until.urlContains('/login'), 5000);
+
+    const redirectedUrl = await driver.getCurrentUrl();
+    assert.ok(redirectedUrl.includes('/login'), `Redirected URL must contain /login, got "${redirectedUrl}"`);
+
+    // Confirm login card is displayed after redirect
+    const loginCard = await driver.findElement(By.css('.login-card'));
+    assert.equal(await loginCard.isDisplayed(), true, 'Login card must be visible after redirect');
+  } finally {
+    if (driver) {
+      await driver.quit();
+    }
+  }
+});
+
+test('Login page displays security badges and platform capabilities', async () => {
+  let driver;
+  try {
+    driver = await createDriver();
+    await driver.get(`${baseUrl}/login`);
+
+    // Verify security badges are present and visible
+    const badges = await driver.findElement(By.css('.security-badges'));
+    assert.equal(await badges.isDisplayed(), true);
+    const badgeText = await badges.getText();
+    assert.ok(badgeText.includes('OAuth 2.0'));
+    assert.ok(badgeText.includes('CSRF State Protection'));
+    assert.ok(badgeText.includes('HttpOnly Session'));
+
+    // Verify platform capability highlights
+    const features = await driver.findElement(By.css('.platform-features'));
+    assert.equal(await features.isDisplayed(), true);
+    const featureText = await features.getText();
+    assert.ok(featureText.includes('8 Automated Detection Rules'));
+  } finally {
+    if (driver) {
+      await driver.quit();
+    }
+  }
+});
