@@ -32,6 +32,10 @@ async function initAuth() {
       if (userName) userName.textContent = data.user.name || 'Security Auditor';
       if (userEmail) userEmail.textContent = data.user.email || '';
       if (userAvatar && data.user.picture) {
+        userAvatar.referrerPolicy = 'no-referrer';
+        userAvatar.onerror = () => {
+          userAvatar.style.display = 'none';
+        };
         userAvatar.src = data.user.picture;
         userAvatar.style.display = 'inline-block';
       }

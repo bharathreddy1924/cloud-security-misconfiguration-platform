@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { spawnSync } = require('child_process');
 
 const HTTP_URL = process.env.GATEWAY_HTTP_URL || 'http://localhost:3001';
 const HTTPS_URL = process.env.GATEWAY_HTTPS_URL || 'https://localhost:3443';
@@ -18,21 +19,64 @@ async function isNginxRunning() {
   }
 }
 
-// Helper for HTTPS fetch using the self-signed CA cert
+// Discovers trusted CAs: cloudsec.crt (self-signed dev cert) and local mkcert root CA if present
+function getTrustedCaCertificates() {
+  const cas = [];
+
+  // 1. Include repository dev certificate (acts as CA when self-signed)
+  if (fs.existsSync(CERT_PATH)) {
+    cas.push(fs.readFileSync(CERT_PATH));
+  }
+
+  // 2. Discover local mkcert root CA across platforms (Windows, macOS, Linux) without hardcoding paths
+  const candidateMkcertPaths = [];
+  if (process.env.LOCALAPPDATA) {
+    candidateMkcertPaths.push(path.join(process.env.LOCALAPPDATA, 'mkcert', 'rootCA.pem'));
+  }
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home) {
+    candidateMkcertPaths.push(path.join(home, 'AppData', 'Local', 'mkcert', 'rootCA.pem'));
+    candidateMkcertPaths.push(path.join(home, 'Library', 'Application Support', 'mkcert', 'rootCA.pem'));
+    candidateMkcertPaths.push(path.join(home, '.local', 'share', 'mkcert', 'rootCA.pem'));
+  }
+  if (process.env.XDG_DATA_HOME) {
+    candidateMkcertPaths.push(path.join(process.env.XDG_DATA_HOME, 'mkcert', 'rootCA.pem'));
+  }
+
+  try {
+    const res = spawnSync('mkcert', ['-CAROOT'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    if (res.status === 0 && res.stdout) {
+      const caroot = res.stdout.trim();
+      if (caroot) {
+        candidateMkcertPaths.unshift(path.join(caroot, 'rootCA.pem'));
+      }
+    }
+  } catch (_) {}
+
+  for (const p of candidateMkcertPaths) {
+    if (p && fs.existsSync(p)) {
+      try {
+        cas.push(fs.readFileSync(p));
+        break;
+      } catch (_) {}
+    }
+  }
+
+  return cas.length > 0 ? cas : undefined;
+}
+
+// Helper for HTTPS fetch using verified CA certificates with strict verification
 function httpsGet(urlPath) {
   return new Promise((resolve, reject) => {
-    let caCert = undefined;
-    if (fs.existsSync(CERT_PATH)) {
-      caCert = fs.readFileSync(CERT_PATH);
-    }
+    const ca = getTrustedCaCertificates();
     const url = new URL(urlPath, HTTPS_URL);
     const req = https.request({
       hostname: url.hostname,
       port: url.port || 3443,
       path: url.pathname + url.search,
       method: 'GET',
-      ca: caCert,
-      rejectUnauthorized: !!caCert,
+      ca,
+      rejectUnauthorized: true,
       timeout: 3000
     }, (res) => {
       let data = '';
