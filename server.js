@@ -19,13 +19,56 @@ const {
 
 const app = express();
 
+// Security hardening: Disable Express fingerprinting header
+app.disable('x-powered-by');
+
 // Body parser
 app.use(express.json({ limit: '1mb' }));
 
-// Session management
-const SESSION_SECRET = process.env.SESSION_SECRET || 'cloudsec-dev-session-secret-change-in-production';
-if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'production') {
-  console.warn('⚠️ WARNING: SESSION_SECRET is not configured. Set SESSION_SECRET in .env for production.');
+// Reverse proxy trust configuration
+// Only trusts reverse proxy headers if explicitly configured via TRUST_PROXY
+const trustProxyEnv = process.env.TRUST_PROXY;
+if (trustProxyEnv === '1' || trustProxyEnv === 'true') {
+  // Trust exactly one reverse proxy hop (Nginx)
+  app.set('trust proxy', 1);
+} else if (trustProxyEnv && !isNaN(Number(trustProxyEnv))) {
+  const hops = parseInt(trustProxyEnv, 10);
+  if (hops > 0 && hops <= 5) {
+    app.set('trust proxy', hops);
+  }
+} else if (trustProxyEnv === 'loopback' || trustProxyEnv === 'linklocal' || trustProxyEnv === 'uniquelocal') {
+  app.set('trust proxy', trustProxyEnv);
+}
+
+// Session management & secret validation
+const INSECURE_DEFAULT_SECRETS = [
+  'cloudsec-dev-session-secret-change-in-production',
+  'cloudsec-docker-session-secret-change-in-production',
+  'secret',
+  'keyboard cat',
+  'changeme'
+];
+
+function validateSessionSecret(secret, env = process.env.NODE_ENV) {
+  if (env === 'production') {
+    if (!secret || typeof secret !== 'string' || INSECURE_DEFAULT_SECRETS.includes(secret.trim()) || secret.trim().length < 16) {
+      throw new Error('FATAL: A secure, non-default SESSION_SECRET must be configured in production (minimum 16 characters).');
+    }
+  }
+  return secret || 'cloudsec-dev-session-secret-change-in-production';
+}
+
+const SESSION_SECRET = validateSessionSecret(process.env.SESSION_SECRET);
+
+// Dynamic secure cookie configuration:
+// - true: always set Secure flag (requires HTTPS)
+// - auto: dynamically set Secure flag if connection is HTTPS (via req.secure and trust proxy)
+// - false: never set Secure flag (standard HTTP development)
+let cookieSecure = false;
+if (process.env.COOKIE_SECURE === 'true') {
+  cookieSecure = true;
+} else if (process.env.COOKIE_SECURE === 'auto') {
+  cookieSecure = 'auto';
 }
 
 app.use(session({
@@ -35,7 +78,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.COOKIE_SECURE === 'true',
+    secure: cookieSecure,
     sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
@@ -450,8 +493,8 @@ app.get('/auth/google/callback', async (req, res) => {
     // Persist user in MongoDB if database is connected
     const dbUser = await persistUser(profile);
 
-    // Establish user session
-    req.session.user = {
+    // Prepare authenticated user payload
+    const authenticatedUser = {
       id: dbUser ? dbUser._id.toString() : profile.sub,
       googleId: profile.sub,
       email: profile.email,
@@ -459,13 +502,28 @@ app.get('/auth/google/callback', async (req, res) => {
       picture: profile.picture || ''
     };
 
-    req.session.save((err) => {
-      if (err) {
-        console.error('Session persistence failed:', err);
-        return res.redirect('/login?error=session_error');
+    // Prevent session fixation by regenerating session identifier upon authentication
+    if (req.session && typeof req.session.regenerate === 'function') {
+      req.session.regenerate((regenErr) => {
+        if (regenErr) {
+          console.error('Session regeneration failed:', regenErr);
+          return res.redirect('/login?error=session_error');
+        }
+        req.session.user = authenticatedUser;
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('Session persistence failed:', saveErr);
+            return res.redirect('/login?error=session_error');
+          }
+          res.redirect('/');
+        });
+      });
+    } else {
+      if (req.session) {
+        req.session.user = authenticatedUser;
       }
       res.redirect('/');
-    });
+    }
   } catch (err) {
     console.error('Google OAuth callback failed:', err.message);
     res.redirect('/login?error=auth_failed');
@@ -745,7 +803,11 @@ app.post('/api/scan', requireAuthApi, async (req, res) => {
       persistence: saved ? 'saved' : 'not-connected'
     });
   } catch (error) {
-    return res.status(500).json({ error: 'Scan failed.', detail: error.message });
+    console.error('Scan execution error:', error.message);
+    const detail = process.env.NODE_ENV === 'production'
+      ? 'An error occurred during resource scan processing.'
+      : error.message;
+    return res.status(500).json({ error: 'Scan failed.', detail });
   }
 });
 
@@ -785,12 +847,47 @@ app.post('/api/scan', requireAuthApi, async (req, res) => {
  *                   type: string
  *                   example: "Database is not connected."
  */
-app.get('/api/scans', requireAuthApi, async (_req, res) => {
+app.get('/api/scans', requireAuthApi, async (req, res) => {
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({ error: 'Database is not connected.' });
   }
-  const scans = await Scan.find().sort({ createdAt: -1 }).limit(20).lean();
+  const user = req.session && req.session.user;
+  const filter = {};
+  if (user) {
+    if (user.email && user.id) {
+      filter.$or = [{ userEmail: user.email }, { userId: user.id }];
+    } else if (user.email) {
+      filter.userEmail = user.email;
+    } else if (user.id) {
+      filter.userId = user.id;
+    }
+  }
+  const scans = await Scan.find(filter).sort({ createdAt: -1 }).limit(20).lean();
   res.json(scans);
+});
+
+// Structured JSON 404 handler for unknown API routes
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    error: 'Not Found',
+    message: `API endpoint ${req.method} ${req.path} does not exist.`
+  });
+});
+
+// Centralized error handling middleware
+app.use((err, req, res, next) => {
+  if (res.headersSent) {
+    return next(err);
+  }
+  console.error('Unhandled application error:', err);
+  const isProd = process.env.NODE_ENV === 'production';
+  if (req.path && req.path.startsWith('/api/')) {
+    return res.status(err.status || err.statusCode || 500).json({
+      error: err.name || 'Internal Server Error',
+      message: isProd ? 'An unexpected error occurred while processing the request.' : (err.message || 'Unknown error')
+    });
+  }
+  res.status(err.status || err.statusCode || 500).send('Internal Server Error');
 });
 
 // ==========================================
@@ -822,3 +919,4 @@ module.exports.app = app;
 module.exports.Scan = Scan;
 module.exports.User = User;
 module.exports.swaggerSpec = swaggerSpec;
+module.exports.validateSessionSecret = validateSessionSecret;

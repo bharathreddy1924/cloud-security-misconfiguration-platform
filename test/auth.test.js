@@ -352,6 +352,20 @@ test('POST /api/scan input validation with authenticated session', async () => {
   });
   assert.equal(badRes.status, 400);
 
+  // Test rejecting payloads with more than 500 resources
+  const oversizedResources = Array.from({ length: 501 }, (_, i) => ({
+    id: `resource-${i}`,
+    type: 's3'
+  }));
+  const oversizedRes = await fetch(`${baseUrl}/api/scan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Cookie': sessionCookie },
+    body: JSON.stringify({ resources: oversizedResources })
+  });
+  assert.equal(oversizedRes.status, 400);
+  const oversizedData = await oversizedRes.json();
+  assert.equal(oversizedData.error, 'A maximum of 500 resources is allowed per scan.');
+
   // Test scan with sample inventory
   const sampleRes = await fetch(`${baseUrl}/api/scan`, {
     method: 'POST',

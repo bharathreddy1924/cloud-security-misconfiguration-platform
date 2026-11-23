@@ -7,19 +7,45 @@ pipeline {
 
   stages {
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        checkout scm
+      }
     }
 
     stage('Install Dependencies') {
-      steps { bat 'npm ci --no-audit --no-fund' }
+      steps {
+        script {
+          if (isUnix()) {
+            sh 'npm ci --no-audit --no-fund'
+          } else {
+            bat 'npm ci --no-audit --no-fund'
+          }
+        }
+      }
     }
 
     stage('Unit Tests') {
-      steps { bat 'npm test' }
+      steps {
+        script {
+          if (isUnix()) {
+            sh 'npm test'
+          } else {
+            bat 'npm test'
+          }
+        }
+      }
     }
 
     stage('Build Docker Image') {
-      steps { bat "docker build -t %IMAGE_NAME%:%BUILD_NUMBER% ." }
+      steps {
+        script {
+          if (isUnix()) {
+            sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+          } else {
+            bat "docker build -t %IMAGE_NAME%:%BUILD_NUMBER% ."
+          }
+        }
+      }
     }
   }
 

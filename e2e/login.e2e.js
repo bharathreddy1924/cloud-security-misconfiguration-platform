@@ -1,3 +1,5 @@
+process.env.NODE_ENV = 'test';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
@@ -180,5 +182,68 @@ test('Login page displays security badges and platform capabilities', async () =
     if (driver) {
       await driver.quit();
     }
+  }
+});
+
+test('Authenticated user can view dashboard, user profile badge, and scan history UI', async () => {
+  // Start an ephemeral test instance with NODE_ENV=test so /auth/test-session is enabled
+  const app = require('../server');
+  const testServer = http.createServer(app);
+  await new Promise((resolve) => testServer.listen(0, '127.0.0.1', resolve));
+  const testPort = testServer.address().port;
+  const testAppUrl = `http://127.0.0.1:${testPort}`;
+
+  let driver;
+  try {
+    // 1. Create authenticated session via test helper endpoint
+    const sessionRes = await fetch(`${testAppUrl}/auth/test-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user: {
+          id: 'selenium-auditor-id',
+          googleId: 'g-selenium-12345',
+          email: 'selenium.auditor@cloudsec.local',
+          name: 'Selenium Security Auditor',
+          picture: ''
+        }
+      })
+    });
+    assert.equal(sessionRes.status, 200);
+    const cookieHeader = sessionRes.headers.get('set-cookie');
+    assert.ok(cookieHeader && cookieHeader.includes('cloudsec.sid'));
+    const sidMatch = cookieHeader.match(/cloudsec\.sid=([^;]+)/);
+    const sidValue = sidMatch ? sidMatch[1] : '';
+
+    // 2. Open Chrome, navigate to domain, inject cookie, and load dashboard (/)
+    driver = await createDriver();
+    await driver.get(`${testAppUrl}/login`);
+    await driver.manage().addCookie({
+      name: 'cloudsec.sid',
+      value: sidValue,
+      path: '/'
+    });
+
+    await driver.get(`${testAppUrl}/`);
+
+    // 3. Verify dashboard loads with correct title and authenticated user name
+    const title = await driver.getTitle();
+    assert.ok(title.includes('CloudSec'), `Title should contain CloudSec, got "${title}"`);
+
+    const userProfile = await driver.findElement(By.id('userProfile'));
+    await driver.wait(until.elementIsVisible(userProfile), 5000);
+    const userNameEl = await driver.findElement(By.id('userName'));
+    const userNameText = await userNameEl.getText();
+    assert.equal(userNameText, 'Selenium Security Auditor');
+
+    // 4. Verify Scan History section and Refresh button are present and visible
+    const historySection = await driver.findElement(By.id('historySection'));
+    assert.equal(await historySection.isDisplayed(), true, 'History section must be visible');
+
+    const refreshBtn = await driver.findElement(By.id('refreshHistoryBtn'));
+    assert.equal(await refreshBtn.isDisplayed(), true, 'Refresh history button must be visible');
+  } finally {
+    if (driver) await driver.quit();
+    await new Promise((resolve) => testServer.close(resolve));
   }
 });

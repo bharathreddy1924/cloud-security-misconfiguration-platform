@@ -50,6 +50,29 @@
       <div class="panel-head"><div><p class="eyebrow">SECURITY POSTURE</p><h2>Detection findings</h2></div><span id="resultTag" class="tag">No scan yet</span></div>
       <div id="findings" class="empty">Run a scan to view detected risks and remediation steps.</div>
     </section>
+    <section class="panel" id="historySection">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">AUDIT TRAIL & HISTORY</p>
+          <h2>Recent scan history</h2>
+        </div>
+        <div class="panel-actions">
+          <button id="refreshHistoryBtn" class="secondary refresh-btn" aria-label="Refresh scan history" title="Refresh history">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 5px; vertical-align: -1px;">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            Refresh history
+          </button>
+          <span id="historyTag" class="tag">0 recorded</span>
+        </div>
+      </div>
+      <p class="muted">Review previous cloud security misconfiguration assessments stored in MongoDB for your authenticated account.</p>
+      <div id="historyLoading" class="loading-state empty" style="display: none;">Loading scan history…</div>
+      <div id="historyError" class="alert-box alert-error" style="display: none;" role="alert"></div>
+      <div id="historyList" class="history-list"></div>
+    </section>
     <footer>Academic capstone prototype • Rule-based checks • No live cloud credentials required</footer>
   </main>
   <script src="/app.js"></script>

@@ -1,9 +1,22 @@
 services:
+  nginx:
+    image: nginx:alpine
+    container_name: cloudsec-nginx
+    ports:
+      - "3001:80"    # HTTP external access (reverse-proxied to app:3000)
+      - "3443:443"   # HTTPS external access (TLS terminated, reverse-proxied to app:3000)
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
   app:
     build: .
     container_name: cloudsec-platform
-    ports:
-      - "3001:3000"
+    expose:
+      - "3000"       # Internal container network only; all external traffic enters via Nginx
     environment:
       PORT: 3000
       MONGODB_URI: mongodb://mongo:27017/cloudsec
@@ -12,7 +25,8 @@ services:
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:3001/auth/google/callback}
       SESSION_SECRET: ${SESSION_SECRET:-cloudsec-docker-session-secret-change-in-production}
       NODE_ENV: production
-      COOKIE_SECURE: "false"
+      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
+      TRUST_PROXY: "1"
     depends_on:
       mongo:
         condition: service_healthy

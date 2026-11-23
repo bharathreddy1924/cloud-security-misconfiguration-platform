@@ -12,6 +12,12 @@ node_modules/
 *.key
 *.cert
 *.crt
+*.pfx
+*.p12
+nginx/certs/*.key
+nginx/certs/*.crt
+nginx/certs/*.pem
+/certs/
 
 # Testing and coverage
 coverage/

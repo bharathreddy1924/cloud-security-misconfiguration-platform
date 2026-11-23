@@ -58,6 +58,32 @@ code{color:#c1caff}
 .sev-LOW{background:#1e3e3a;color:#83dfc1}
 footer{text-align:center;color:#697895;font-size:11px;padding:28px 0}
 
+/* Scan History Styling */
+.panel-actions{display:flex;align-items:center;gap:10px}
+.refresh-btn{display:inline-flex;align-items:center;padding:7px 14px;font-size:12px;border-radius:6px;cursor:pointer;transition:all 0.2s}
+.refresh-btn:hover{background:#253556;border-color:#4a5d85;color:#e8edf7}
+.refresh-btn:disabled{opacity:0.6;cursor:not-allowed}
+.history-list{margin-top:14px;display:flex;flex-direction:column;gap:12px}
+.history-item{background:#0e1628;border:1px solid #23334f;border-radius:10px;padding:16px;transition:border-color 0.2s}
+.history-item:hover{border-color:#3d527a}
+.history-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.history-title-group{display:flex;flex-direction:column;gap:4px}
+.history-date{font-size:14px;font-weight:700;color:#e1e8f8}
+.history-time{font-size:11px;color:#7e8fa9}
+.history-badges{display:flex;align-items:center;gap:8px}
+.history-status{font-size:11px;font-weight:700;padding:4px 9px;border-radius:5px}
+.history-status-clean{background:#18362b;color:#40d6a0;border:1px solid #285e4a}
+.history-status-risks{background:#441b25;color:#ff8991;border:1px solid #732a3b}
+.history-details{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid #1c2a44;flex-wrap:wrap;gap:10px}
+.history-meta{display:flex;align-items:center;gap:14px;font-size:12px;color:#9cb0d1}
+.history-meta strong{color:#e8edf7}
+.sev-pills{display:flex;gap:6px;flex-wrap:wrap}
+.sev-pill{font-size:11px;font-weight:700;padding:3px 7px;border-radius:4px}
+.sev-pill.crit{background:#51232d;color:#ff8991}
+.sev-pill.high{background:#4b3421;color:#ffc27f}
+.sev-pill.med{background:#403b20;color:#e9d77a}
+.sev-pill.low{background:#1e3e3a;color:#83dfc1}
+
 /* Login Page Styling */
 .auth-main{max-width:680px;margin:0 auto;padding:48px 20px}
 .login-container{display:flex;justify-content:center;margin-top:12px}
@@ -101,4 +127,7 @@ footer{text-align:center;color:#697895;font-size:11px;padding:28px 0}
   .topbar-right{gap:10px}
   .user-email{display:none}
   .login-card{padding:24px 18px}
+  .panel-head{flex-direction:column;align-items:flex-start;gap:8px}
+  .panel-actions{width:100%;justify-content:space-between}
+  .history-details{flex-direction:column;align-items:flex-start;gap:8px}
 }
