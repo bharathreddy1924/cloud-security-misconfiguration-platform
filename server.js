@@ -535,14 +535,14 @@ function handleLogout(req, res) {
   if (req.session) {
     req.session.destroy((err) => {
       if (err) console.error('Error destroying session:', err);
-      res.clearCookie('cloudsec.sid');
+      res.clearCookie('cloudsec.sid', { path: '/' });
       if (req.headers.accept && req.headers.accept.includes('application/json')) {
         return res.json({ success: true, message: 'Signed out successfully' });
       }
       return res.redirect('/login?status=logged_out');
     });
   } else {
-    res.clearCookie('cloudsec.sid');
+    res.clearCookie('cloudsec.sid', { path: '/' });
     res.redirect('/login?status=logged_out');
   }
 }
@@ -852,15 +852,16 @@ app.get('/api/scans', requireAuthApi, async (req, res) => {
     return res.status(503).json({ error: 'Database is not connected.' });
   }
   const user = req.session && req.session.user;
+  if (!user || (!user.email && !user.id)) {
+    return res.json([]);
+  }
   const filter = {};
-  if (user) {
-    if (user.email && user.id) {
-      filter.$or = [{ userEmail: user.email }, { userId: user.id }];
-    } else if (user.email) {
-      filter.userEmail = user.email;
-    } else if (user.id) {
-      filter.userId = user.id;
-    }
+  if (user.email && user.id) {
+    filter.$or = [{ userEmail: user.email }, { userId: user.id }];
+  } else if (user.email) {
+    filter.userEmail = user.email;
+  } else if (user.id) {
+    filter.userId = user.id;
   }
   const scans = await Scan.find(filter).sort({ createdAt: -1 }).limit(20).lean();
   res.json(scans);
