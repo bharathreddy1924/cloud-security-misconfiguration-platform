@@ -206,3 +206,23 @@ test('Nginx Gateway: Protected API endpoints strictly reject unauthenticated req
   assert.equal(rootRes.status, 302);
   assert.ok(rootRes.headers.get('location').includes('/login'));
 });
+
+test('Nginx Gateway: Rate limiting on API routes (/api/) returns HTTP 429 upon bursting', async (t) => {
+  const active = await isNginxRunning();
+  if (!active) {
+    t.skip('Nginx container is not active; skipping API rate limiting test');
+    return;
+  }
+
+  // Rate limit for /api/ is 15r/s with burst=25.
+  // Sending 50 concurrent requests will cleanly exceed the burst limit.
+  const requests = Array.from({ length: 50 }, () =>
+    fetch(`${HTTP_URL}/api/health`)
+  );
+
+  const responses = await Promise.all(requests);
+  const statusCodes = responses.map(r => r.status);
+
+  const has429 = statusCodes.includes(429);
+  assert.ok(has429, `Rapid API requests must trigger rate limiting (HTTP 429). Received status codes: ${statusCodes.slice(0, 15).join(', ')}...`);
+});
