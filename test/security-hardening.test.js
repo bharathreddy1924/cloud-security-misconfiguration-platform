@@ -101,6 +101,10 @@ test('Security Hardening: Unknown /api/* routes return structured JSON 404 respo
 
 test('Security Hardening: Session fixation prevention regenerates session ID on OAuth callback', async () => {
   const originalFetch = global.fetch;
+  const savedId = process.env.GOOGLE_CLIENT_ID;
+  const savedSecret = process.env.GOOGLE_CLIENT_SECRET;
+  process.env.GOOGLE_CLIENT_ID = 'test-client-id-hardening.apps.googleusercontent.com';
+  process.env.GOOGLE_CLIENT_SECRET = 'test-client-secret-hardening';
 
   // Mock Google token and userinfo endpoints
   global.fetch = async (url, options) => {
@@ -162,6 +166,8 @@ test('Security Hardening: Session fixation prevention regenerates session ID on 
     assert.notEqual(preAuthSid, postAuthSid, 'Pre-authentication session ID must not equal post-authentication session ID (session fixation prevention)');
   } finally {
     global.fetch = originalFetch;
+    process.env.GOOGLE_CLIENT_ID = savedId;
+    process.env.GOOGLE_CLIENT_SECRET = savedSecret;
   }
 });
 
