@@ -19,7 +19,7 @@ async function isNginxRunning() {
   }
 }
 
-// Discovers trusted CAs: cloudsec.crt (self-signed dev cert) and local mkcert root CA if present
+// Discovers trusted CAs: cloudsec.crt (self-signed dev cert), explicit GATEWAY_CA_CERT_PATH, or local mkcert root CA
 function getTrustedCaCertificates() {
   const cas = [];
 
@@ -28,7 +28,21 @@ function getTrustedCaCertificates() {
     cas.push(fs.readFileSync(CERT_PATH));
   }
 
-  // 2. Discover local mkcert root CA across platforms (Windows, macOS, Linux) without hardcoding paths
+  // 2. Explicit CA certificate path via environment variable (e.g. Jenkins/CI or custom root CA)
+  if (process.env.GATEWAY_CA_CERT_PATH !== undefined) {
+    const explicitCaPath = process.env.GATEWAY_CA_CERT_PATH;
+    if (!explicitCaPath || !fs.existsSync(explicitCaPath)) {
+      throw new Error(`GATEWAY_CA_CERT_PATH is configured ('${explicitCaPath}'), but the file does not exist.`);
+    }
+    try {
+      cas.push(fs.readFileSync(explicitCaPath));
+    } catch (err) {
+      throw new Error(`Failed to read CA certificate from GATEWAY_CA_CERT_PATH ('${explicitCaPath}'): ${err.message}`);
+    }
+    return cas;
+  }
+
+  // 3. Fallback: discover local mkcert root CA across platforms (Windows, macOS, Linux) without hardcoding paths
   const candidateMkcertPaths = [];
   if (process.env.LOCALAPPDATA) {
     candidateMkcertPaths.push(path.join(process.env.LOCALAPPDATA, 'mkcert', 'rootCA.pem'));
@@ -154,6 +168,80 @@ test('Nginx Gateway: Security headers and TLS verification on HTTPS endpoint (:3
   const csp = res.headers['content-security-policy'];
   assert.ok(csp);
   assert.ok(csp.includes("default-src 'self'"));
+});
+
+test('Nginx Gateway: getTrustedCaCertificates fails clearly when GATEWAY_CA_CERT_PATH does not exist', () => {
+  const origEnv = process.env.GATEWAY_CA_CERT_PATH;
+  try {
+    process.env.GATEWAY_CA_CERT_PATH = path.join(__dirname, 'non-existent-ca.pem');
+    assert.throws(
+      () => getTrustedCaCertificates(),
+      /GATEWAY_CA_CERT_PATH is configured/
+    );
+  } finally {
+    if (origEnv !== undefined) {
+      process.env.GATEWAY_CA_CERT_PATH = origEnv;
+    } else {
+      delete process.env.GATEWAY_CA_CERT_PATH;
+    }
+  }
+});
+
+test('Nginx Gateway: Explicit GATEWAY_CA_CERT_PATH environment variable is loaded and trusted', async (t) => {
+  const active = await isNginxRunning();
+  if (!active) {
+    t.skip('Nginx container is not active; skipping explicit CA path test');
+    return;
+  }
+
+  // 1. Check configured GATEWAY_CA_CERT_PATH first (e.g. CI / Jenkins LocalSystem environment)
+  let rootCaPath = null;
+  if (process.env.GATEWAY_CA_CERT_PATH && fs.existsSync(process.env.GATEWAY_CA_CERT_PATH)) {
+    rootCaPath = process.env.GATEWAY_CA_CERT_PATH;
+  } else {
+    // 2. Fall back to user-local mkcert discovery
+    const candidatePaths = [
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'mkcert', 'rootCA.pem'),
+      (process.env.HOME || process.env.USERPROFILE) && path.join(process.env.HOME || process.env.USERPROFILE, 'AppData', 'Local', 'mkcert', 'rootCA.pem'),
+      (process.env.HOME || process.env.USERPROFILE) && path.join(process.env.HOME || process.env.USERPROFILE, 'Library', 'Application Support', 'mkcert', 'rootCA.pem'),
+      (process.env.HOME || process.env.USERPROFILE) && path.join(process.env.HOME || process.env.USERPROFILE, '.local', 'share', 'mkcert', 'rootCA.pem')
+    ].filter(Boolean);
+
+    try {
+      const res = spawnSync('mkcert', ['-CAROOT'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      if (res.status === 0 && res.stdout) {
+        const caroot = res.stdout.trim();
+        if (caroot) candidatePaths.unshift(path.join(caroot, 'rootCA.pem'));
+      }
+    } catch (_) {}
+
+    rootCaPath = candidatePaths.find(p => fs.existsSync(p));
+  }
+
+  if (!rootCaPath) {
+    t.skip('Neither GATEWAY_CA_CERT_PATH nor local mkcert rootCA.pem is available in environment; skipping explicit CA integration test');
+    return;
+  }
+
+  const origEnv = process.env.GATEWAY_CA_CERT_PATH;
+  try {
+    process.env.GATEWAY_CA_CERT_PATH = rootCaPath;
+    const certs = getTrustedCaCertificates();
+    assert.ok(Array.isArray(certs) && certs.length >= 2, 'Must include dev certificate and the explicit rootCA.pem');
+
+    const rootCaBytes = fs.readFileSync(rootCaPath);
+    const hasRootCa = certs.some(c => Buffer.isBuffer(c) && c.equals(rootCaBytes));
+    assert.ok(hasRootCa, 'Explicit GATEWAY_CA_CERT_PATH certificate must be present in the trusted CA list');
+
+    const res = await httpsGet('/api/health');
+    assert.equal(res.status, 200, 'HTTPS request must succeed using explicit GATEWAY_CA_CERT_PATH');
+  } finally {
+    if (origEnv !== undefined) {
+      process.env.GATEWAY_CA_CERT_PATH = origEnv;
+    } else {
+      delete process.env.GATEWAY_CA_CERT_PATH;
+    }
+  }
 });
 
 test('Nginx Gateway: Rate limiting on authentication routes (/auth/) returns HTTP 429 upon bursting', async (t) => {
