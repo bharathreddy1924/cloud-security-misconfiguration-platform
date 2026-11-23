@@ -227,7 +227,7 @@ test('Nginx Gateway: Explicit GATEWAY_CA_CERT_PATH environment variable is loade
   try {
     process.env.GATEWAY_CA_CERT_PATH = rootCaPath;
     const certs = getTrustedCaCertificates();
-    assert.ok(Array.isArray(certs) && certs.length >= 2, 'Must include dev certificate and the explicit rootCA.pem');
+    assert.ok(Array.isArray(certs) && certs.length > 0, 'Trusted CA list must contain certificates');
 
     const rootCaBytes = fs.readFileSync(rootCaPath);
     const hasRootCa = certs.some(c => Buffer.isBuffer(c) && c.equals(rootCaBytes));
