@@ -169,10 +169,11 @@ test('Scan History: Refreshing history after a successful scan includes the newl
     return;
   }
 
+  const uniqueSuffix = Date.now();
   const cookie = await createAuthenticatedSession({
-    id: 'user-refresh-test-id',
-    googleId: 'g-refresh-test',
-    email: 'refresh.tester@cloudsec.local',
+    id: `user-refresh-test-${uniqueSuffix}`,
+    googleId: `g-refresh-${uniqueSuffix}`,
+    email: `refresh.tester.${uniqueSuffix}@cloudsec.local`,
     name: 'Refresh Tester'
   });
 
