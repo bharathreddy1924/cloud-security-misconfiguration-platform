@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const { Builder, By, until } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
+const { defaultReporter, openReport } = require('../scripts/generate-selenium-report');
 
 // Configuration
 const DEFAULT_PORT = 3001;
@@ -87,6 +88,17 @@ test.before(async () => {
 });
 
 test.after(async () => {
+  // Generate professional HTML report and open in default browser
+  try {
+    const reportPath = defaultReporter.saveReport('reports/selenium-report.html', {
+      isHeadless,
+      baseUrl
+    });
+    openReport(reportPath);
+  } catch (err) {
+    console.error('[Report] Error generating report:', err.message);
+  }
+
   if (driver) {
     try {
       if (isHeadless) {
@@ -109,7 +121,8 @@ test.after(async () => {
   }
 });
 
-test.beforeEach(async () => {
+test.beforeEach(async (t) => {
+  defaultReporter.recordStart(t);
   if (driver) {
     try {
       await driver.manage().deleteAllCookies();
@@ -118,6 +131,7 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async (t) => {
+  defaultReporter.recordEnd(t);
   // Pause for 3 seconds and clear cookies only after tests 1-4
   if (!t || t.name !== FINAL_TEST_NAME) {
     await pauseIfVisible();

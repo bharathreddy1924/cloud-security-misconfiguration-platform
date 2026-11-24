@@ -1,0 +1,1342 @@
+{
+  "info": {
+    "_postman_id": "a8d29b14-36f1-4e78-9a63-b1d5423e8901",
+    "name": "Cloud Security Misconfiguration Detection Platform",
+    "description": "Production API collection for demonstrating and evaluating the Cloud Security Misconfiguration Detection Platform.\n\n### Platform Capabilities\n- **Automated Rule Engine**: Evaluates 8 security checks across S3 storage, Security Groups (SSH/RDP), IAM Policies, Databases, CloudTrail audit logs, and EBS storage volumes.\n- **Authentication & Security**: Google OAuth 2.0 with session regeneration, CSRF mitigation, HttpOnly cookies (`cloudsec.sid`), and protected routes.\n- **MongoDB Scan Persistence**: Automatically attributes scans to authenticated users and records historical trends.\n\n### Environment Setup\nDefault `{{baseUrl}}` is configured to `http://localhost:3001` (Docker Compose entrypoint via Nginx reverse proxy) or `http://localhost:3000` (direct Node.js standalone).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Collection-level pre-request script",
+          "// If the sessionCookie environment variable is populated, automatically inject the Cookie header",
+          "const sessionCookie = pm.environment.get('sessionCookie');",
+          "if (sessionCookie && sessionCookie.trim().length > 0) {",
+          "    pm.request.headers.upsert({",
+          "        key: 'Cookie',",
+          "        value: 'cloudsec.sid=' + sessionCookie.trim()",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. System",
+      "description": "Health check and infrastructure diagnostic endpoints. Publicly accessible without authentication.",
+      "item": [
+        {
+          "name": "System Health Status (GET /api/health)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response indicates status is ok', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('ok');",
+                  "});",
+                  "",
+                  "pm.test('Database connection status is reported', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.database).to.be.oneOf(['connected', 'disconnected']);",
+                  "});",
+                  "",
+                  "pm.test('Google OAuth configuration status is reported', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.auth).to.be.an('object');",
+                  "    pm.expect(jsonData.auth.provider).to.eql('google');",
+                  "    pm.expect(jsonData.auth.configured).to.be.a('boolean');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Returns the operational status of the service, MongoDB database connectivity (`connected` or `disconnected`), and whether Google OAuth credentials are configured in the environment."
+          },
+          "response": [
+            {
+              "name": "200 OK - Database Connected & OAuth Configured",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/health",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "health"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"status\": \"ok\",\n  \"database\": \"connected\",\n  \"auth\": {\n    \"provider\": \"google\",\n    \"configured\": true\n  }\n}"
+            },
+            {
+              "name": "200 OK - Standalone In-Memory (No MongoDB)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/health",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "health"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"status\": \"ok\",\n  \"database\": \"disconnected\",\n  \"auth\": {\n    \"provider\": \"google\",\n    \"configured\": false\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Authentication",
+      "description": "Google OAuth 2.0 flow, session management, identity verification, and sign-out endpoints.",
+      "item": [
+        {
+          "name": "Get Current User Profile - Authenticated (GET /api/auth/me)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('User session is authenticated', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.authenticated).to.eql(true);",
+                  "    pm.expect(jsonData.user).to.be.an('object');",
+                  "    pm.expect(jsonData.user.id).to.be.a('string');",
+                  "    pm.expect(jsonData.user.email).to.be.a('string');",
+                  "    pm.expect(jsonData.user.name).to.be.a('string');",
+                  "    ",
+                  "    if (jsonData.user.id) {",
+                  "        pm.environment.set('activeUserId', jsonData.user.id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Returns the authenticated user's profile (`id`, `googleId`, `email`, `name`, `picture`). Requires an active `cloudsec.sid` session cookie."
+          },
+          "response": [
+            {
+              "name": "200 OK - Active Session Profile",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/auth/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"authenticated\": true,\n  \"user\": {\n    \"id\": \"673dfa12b984fa001234abcd\",\n    \"googleId\": \"108234912384912834912\",\n    \"email\": \"auditor@university.edu\",\n    \"name\": \"Cloud Security Auditor\",\n    \"picture\": \"https://lh3.googleusercontent.com/a/default-avatar\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Current User Profile - Unauthenticated (GET /api/auth/me)",
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Remove Cookie header to enforce unauthenticated test",
+                  "pm.request.headers.remove('Cookie');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Rejection structure is verified', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.authenticated).to.eql(false);",
+                  "    pm.expect(jsonData.error).to.eql('Not authenticated');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Verifies that `GET /api/auth/me` returns HTTP 401 with `{ authenticated: false, error: 'Not authenticated' }` when called without a session cookie."
+          },
+          "response": [
+            {
+              "name": "401 Unauthorized - No Session Cookie",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/auth/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "me"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"authenticated\": false,\n  \"error\": \"Not authenticated\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Initiate Google OAuth 2.0 (GET /auth/google)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 302 Found (OAuth Redirection)', function () {",
+                  "    pm.response.to.have.status(302);",
+                  "});",
+                  "",
+                  "pm.test('Location header directs to Google OAuth or unconfigured fallback', function () {",
+                  "    const location = pm.response.headers.get('Location');",
+                  "    pm.expect(location).to.be.a('string');",
+                  "    const isGoogleAuth = location.includes('accounts.google.com/o/oauth2/v2/auth');",
+                  "    const isUnconfigured = location.includes('/login?error=unconfigured');",
+                  "    pm.expect(isGoogleAuth || isUnconfigured).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('Session cookie cloudsec.sid is issued with security attributes', function () {",
+                  "    const setCookie = pm.response.headers.get('Set-Cookie');",
+                  "    if (setCookie) {",
+                  "        pm.expect(setCookie).to.include('cloudsec.sid');",
+                  "        pm.expect(setCookie.toLowerCase()).to.include('httponly');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/google",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "google"
+              ]
+            },
+            "description": "Initiates Google OAuth 2.0. Generates a cryptographically random 32-byte state parameter stored in the session for CSRF protection, and issues a 302 redirect to Google Accounts."
+          },
+          "response": [
+            {
+              "name": "302 Redirect to Google OAuth Consent",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/google",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "google"
+                  ]
+                }
+              },
+              "status": "Found",
+              "code": 302,
+              "_postman_previewlanguage": "plain",
+              "header": [
+                {
+                  "key": "Location",
+                  "value": "https://accounts.google.com/o/oauth2/v2/auth?client_id=GOOGLE_CLIENT_ID&redirect_uri=http%3A%2F%2Flocalhost%3A3001%2Fauth%2Fgoogle%2Fcallback&response_type=code&scope=openid+email+profile&state=7f9a8b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a&access_type=online&prompt=select_account"
+                },
+                {
+                  "key": "Set-Cookie",
+                  "value": "cloudsec.sid=s%3A...; Path=/; HttpOnly; SameSite=Lax"
+                }
+              ],
+              "body": "Found. Redirecting to https://accounts.google.com/o/oauth2/v2/auth?..."
+            },
+            {
+              "name": "302 Redirect - OAuth Unconfigured",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/google",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "google"
+                  ]
+                }
+              },
+              "status": "Found",
+              "code": 302,
+              "_postman_previewlanguage": "plain",
+              "header": [
+                {
+                  "key": "Location",
+                  "value": "/login?error=unconfigured"
+                }
+              ],
+              "body": "Found. Redirecting to /login?error=unconfigured"
+            }
+          ]
+        },
+        {
+          "name": "OAuth Callback - CSRF State Protection Check (GET /auth/google/callback)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 403 Forbidden (CSRF State Protection Triggered)', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "",
+                  "pm.test('Response body confirms state verification failure', function () {",
+                  "    pm.expect(pm.response.text()).to.include('OAuth state verification failed (CSRF protection)');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/google/callback?code=sample_mock_auth_code_xyz&state=invalid_or_missing_csrf_state",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "google",
+                "callback"
+              ],
+              "query": [
+                {
+                  "key": "code",
+                  "value": "sample_mock_auth_code_xyz",
+                  "description": "Authorization code returned by Google OAuth"
+                },
+                {
+                  "key": "state",
+                  "value": "invalid_or_missing_csrf_state",
+                  "description": "CSRF state token (must match session oauthState)"
+                }
+              ]
+            },
+            "description": "Demonstrates defensive CSRF mitigation. The callback endpoint verifies the `state` query parameter against `req.session.oauthState`. If state is missing, forged, or mismatched, returns HTTP 403 Forbidden."
+          },
+          "response": [
+            {
+              "name": "403 Forbidden - CSRF State Mismatch",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/google/callback?code=mock&state=invalid",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "google",
+                    "callback"
+                  ]
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "_postman_previewlanguage": "plain",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/html; charset=utf-8"
+                }
+              ],
+              "body": "OAuth state verification failed (CSRF protection). Please return to login and try again."
+            }
+          ]
+        },
+        {
+          "name": "Sign Out Current User - GET (GET /auth/logout)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Logout confirmation received', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    pm.expect(jsonData.message).to.eql('Signed out successfully');",
+                  "});",
+                  "",
+                  "pm.test('Environment session variables cleared', function () {",
+                  "    pm.environment.set('activeUserId', '');",
+                  "    pm.environment.set('lastScanId', '');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Terminates the user session, clears the `cloudsec.sid` cookie, and returns a JSON confirmation when requested with `Accept: application/json`."
+          },
+          "response": [
+            {
+              "name": "200 OK - Signed Out Successfully (JSON)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/logout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "logout"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Signed out successfully\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Sign Out Current User - POST (POST /auth/logout)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Logout confirmation received', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    pm.expect(jsonData.message).to.eql('Signed out successfully');",
+                  "});",
+                  "",
+                  "pm.test('Environment session variables cleared', function () {",
+                  "    pm.environment.set('activeUserId', '');",
+                  "    pm.environment.set('lastScanId', '');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "POST endpoint for terminating the current user session and clearing the `cloudsec.sid` cookie."
+          },
+          "response": [
+            {
+              "name": "200 OK - Signed Out Successfully (POST)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/logout",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "logout"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Signed out successfully\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Scanner",
+      "description": "Cloud security misconfiguration evaluation engine and historical scan record retrieval.",
+      "item": [
+        {
+          "name": "Scan Cloud Infrastructure - 8 Misconfiguration Rules (POST /api/scan)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Resource count and summary totals match expectations', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.resourceCount).to.eql(7);",
+                  "    pm.expect(jsonData.summary).to.be.an('object');",
+                  "    pm.expect(jsonData.summary.total).to.eql(8);",
+                  "    pm.expect(jsonData.summary.critical).to.eql(4);",
+                  "    pm.expect(jsonData.summary.high).to.eql(2);",
+                  "    pm.expect(jsonData.summary.medium).to.eql(2);",
+                  "    pm.expect(jsonData.summary.low).to.eql(0);",
+                  "    pm.expect(jsonData.persistence).to.be.oneOf(['saved', 'not-connected']);",
+                  "    ",
+                  "    if (jsonData.scanId) {",
+                  "        pm.environment.set('lastScanId', jsonData.scanId);",
+                  "    }",
+                  "});",
+                  "",
+                  "pm.test('All 8 misconfiguration rules are detected', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.findings).to.be.an('array');",
+                  "    pm.expect(jsonData.findings.length).to.eql(8);",
+                  "    ",
+                  "    const detectedRules = jsonData.findings.map(f => f.ruleId);",
+                  "    const expectedRules = [",
+                  "        'S3_PUBLIC_ACCESS',",
+                  "        'S3_ENCRYPTION_DISABLED',",
+                  "        'OPEN_SSH',",
+                  "        'OPEN_RDP',",
+                  "        'IAM_WILDCARD_POLICY',",
+                  "        'DATABASE_PUBLIC',",
+                  "        'CLOUDTRAIL_DISABLED',",
+                  "        'EBS_ENCRYPTION_DISABLED'",
+                  "    ];",
+                  "    ",
+                  "    expectedRules.forEach(rule => {",
+                  "        pm.expect(detectedRules).to.include(rule, 'Rule ' + rule + ' should be detected');",
+                  "    });",
+                  "    ",
+                  "    jsonData.findings.forEach(f => {",
+                  "        pm.expect(f.resourceId).to.be.a('string');",
+                  "        pm.expect(f.resourceType).to.be.a('string');",
+                  "        pm.expect(f.title).to.be.a('string');",
+                  "        pm.expect(f.severity).to.be.oneOf(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']);",
+                  "        pm.expect(f.description).to.be.a('string');",
+                  "        pm.expect(f.remediation).to.be.a('string');",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": [\n    {\n      \"id\": \"bucket-customer-uploads\",\n      \"type\": \"s3\",\n      \"publicAccess\": true,\n      \"blockPublicAccess\": false,\n      \"encryptionEnabled\": false\n    },\n    {\n      \"id\": \"sg-external-admin-access\",\n      \"type\": \"security-group\",\n      \"ingress\": [\n        {\n          \"port\": 22,\n          \"cidr\": \"0.0.0.0/0\"\n        },\n        {\n          \"port\": 3389,\n          \"cidr\": \"0.0.0.0/0\"\n        }\n      ]\n    },\n    {\n      \"id\": \"iam-admin-fullaccess-policy\",\n      \"type\": \"iam-policy\",\n      \"action\": \"*\",\n      \"resource\": \"*\"\n    },\n    {\n      \"id\": \"prod-customer-aurora-db\",\n      \"type\": \"database\",\n      \"publiclyAccessible\": true\n    },\n    {\n      \"id\": \"global-audit-trail\",\n      \"type\": \"cloudtrail\",\n      \"enabled\": false\n    },\n    {\n      \"id\": \"vol-finance-records-01\",\n      \"type\": \"ebs\",\n      \"encrypted\": false\n    },\n    {\n      \"id\": \"bucket-secure-audit-logs\",\n      \"type\": \"s3\",\n      \"publicAccess\": false,\n      \"blockPublicAccess\": true,\n      \"encryptionEnabled\": true\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/scan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scan"
+              ]
+            },
+            "description": "Submits a realistic cloud infrastructure inventory demonstrating all 8 security detection rules:\n1. **S3_PUBLIC_ACCESS** (CRITICAL)\n2. **S3_ENCRYPTION_DISABLED** (HIGH)\n3. **OPEN_SSH** (CRITICAL)\n4. **OPEN_RDP** (CRITICAL)\n5. **IAM_WILDCARD_POLICY** (HIGH)\n6. **DATABASE_PUBLIC** (CRITICAL)\n7. **CLOUDTRAIL_DISABLED** (MEDIUM)\n8. **EBS_ENCRYPTION_DISABLED** (MEDIUM)\n\nAlso includes 1 compliant resource (`bucket-secure-audit-logs`) to demonstrate detection selectivity."
+          },
+          "response": [
+            {
+              "name": "200 OK - All 8 Misconfiguration Rules Detected",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"resources\": [\n    {\n      \"id\": \"bucket-customer-uploads\",\n      \"type\": \"s3\",\n      \"publicAccess\": true,\n      \"blockPublicAccess\": false,\n      \"encryptionEnabled\": false\n    },\n    {\n      \"id\": \"sg-external-admin-access\",\n      \"type\": \"security-group\",\n      \"ingress\": [\n        {\n          \"port\": 22,\n          \"cidr\": \"0.0.0.0/0\"\n        },\n        {\n          \"port\": 3389,\n          \"cidr\": \"0.0.0.0/0\"\n        }\n      ]\n    },\n    {\n      \"id\": \"iam-admin-fullaccess-policy\",\n      \"type\": \"iam-policy\",\n      \"action\": \"*\",\n      \"resource\": \"*\"\n    },\n    {\n      \"id\": \"prod-customer-aurora-db\",\n      \"type\": \"database\",\n      \"publiclyAccessible\": true\n    },\n    {\n      \"id\": \"global-audit-trail\",\n      \"type\": \"cloudtrail\",\n      \"enabled\": false\n    },\n    {\n      \"id\": \"vol-finance-records-01\",\n      \"type\": \"ebs\",\n      \"encrypted\": false\n    },\n    {\n      \"id\": \"bucket-secure-audit-logs\",\n      \"type\": \"s3\",\n      \"publicAccess\": false,\n      \"blockPublicAccess\": true,\n      \"encryptionEnabled\": true\n    }\n  ]\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/scan",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scan"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"scanId\": \"674312abf98210001a2b3c4d\",\n  \"resourceCount\": 7,\n  \"summary\": {\n    \"total\": 8,\n    \"critical\": 4,\n    \"high\": 2,\n    \"medium\": 2,\n    \"low\": 0\n  },\n  \"findings\": [\n    {\n      \"ruleId\": \"S3_PUBLIC_ACCESS\",\n      \"resourceId\": \"bucket-customer-uploads\",\n      \"resourceType\": \"s3\",\n      \"title\": \"S3 bucket allows public access\",\n      \"severity\": \"CRITICAL\",\n      \"description\": \"Public bucket access can expose stored data to unauthorised users.\",\n      \"remediation\": \"Enable all S3 Block Public Access settings and review bucket policies and ACLs.\"\n    },\n    {\n      \"ruleId\": \"S3_ENCRYPTION_DISABLED\",\n      \"resourceId\": \"bucket-customer-uploads\",\n      \"resourceType\": \"s3\",\n      \"title\": \"S3 default encryption is disabled\",\n      \"severity\": \"HIGH\",\n      \"description\": \"Objects may be stored without server-side encryption at rest.\",\n      \"remediation\": \"Enable default server-side encryption using SSE-S3 or an approved KMS key.\"\n    },\n    {\n      \"ruleId\": \"OPEN_SSH\",\n      \"resourceId\": \"sg-external-admin-access\",\n      \"resourceType\": \"security-group\",\n      \"title\": \"SSH exposed to the internet\",\n      \"severity\": \"CRITICAL\",\n      \"description\": \"Port 22 is open to 0.0.0.0/0 or ::/0.\",\n      \"remediation\": \"Restrict SSH to a trusted VPN, bastion host, or approved source CIDR.\"\n    },\n    {\n      \"ruleId\": \"OPEN_RDP\",\n      \"resourceId\": \"sg-external-admin-access\",\n      \"resourceType\": \"security-group\",\n      \"title\": \"RDP exposed to the internet\",\n      \"severity\": \"CRITICAL\",\n      \"description\": \"Port 3389 is open to 0.0.0.0/0 or ::/0.\",\n      \"remediation\": \"Restrict RDP to a trusted VPN or approved source CIDR.\"\n    },\n    {\n      \"ruleId\": \"IAM_WILDCARD_POLICY\",\n      \"resourceId\": \"iam-admin-fullaccess-policy\",\n      \"resourceType\": \"iam-policy\",\n      \"title\": \"IAM policy grants wildcard permissions\",\n      \"severity\": \"HIGH\",\n      \"description\": \"A policy with Action or Resource set to * may grant excessive privileges.\",\n      \"remediation\": \"Apply least privilege: specify only required actions and resource ARNs.\"\n    },\n    {\n      \"ruleId\": \"DATABASE_PUBLIC\",\n      \"resourceId\": \"prod-customer-aurora-db\",\n      \"resourceType\": \"database\",\n      \"title\": \"Database is publicly accessible\",\n      \"severity\": \"CRITICAL\",\n      \"description\": \"A public database endpoint increases exposure to internet-based attacks.\",\n      \"remediation\": \"Disable public accessibility and place the database in private subnets.\"\n    },\n    {\n      \"ruleId\": \"CLOUDTRAIL_DISABLED\",\n      \"resourceId\": \"global-audit-trail\",\n      \"resourceType\": \"cloudtrail\",\n      \"title\": \"Cloud audit logging is disabled\",\n      \"severity\": \"MEDIUM\",\n      \"description\": \"Disabled audit logging reduces visibility into account activity.\",\n      \"remediation\": \"Enable CloudTrail in all required regions and protect log integrity.\"\n    },\n    {\n      \"ruleId\": \"EBS_ENCRYPTION_DISABLED\",\n      \"resourceId\": \"vol-finance-records-01\",\n      \"resourceType\": \"ebs\",\n      \"title\": \"Block storage encryption is disabled\",\n      \"severity\": \"MEDIUM\",\n      \"description\": \"An unencrypted volume may expose data if the underlying storage is accessed.\",\n      \"remediation\": \"Enable encryption by default and encrypt existing volumes during migration.\"\n    }\n  ],\n  \"persistence\": \"saved\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Scan Cloud Infrastructure - Compliant Resources (POST /api/scan)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Compliant scan produces 0 findings', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.resourceCount).to.eql(6);",
+                  "    pm.expect(jsonData.summary.total).to.eql(0);",
+                  "    pm.expect(jsonData.summary.critical).to.eql(0);",
+                  "    pm.expect(jsonData.summary.high).to.eql(0);",
+                  "    pm.expect(jsonData.summary.medium).to.eql(0);",
+                  "    pm.expect(jsonData.summary.low).to.eql(0);",
+                  "    pm.expect(jsonData.findings).to.be.an('array').that.is.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": [\n    {\n      \"id\": \"bucket-hardened-assets\",\n      \"type\": \"s3\",\n      \"publicAccess\": false,\n      \"blockPublicAccess\": true,\n      \"encryptionEnabled\": true\n    },\n    {\n      \"id\": \"sg-secure-web-tier\",\n      \"type\": \"security-group\",\n      \"ingress\": [\n        {\n          \"port\": 443,\n          \"cidr\": \"10.0.0.0/16\"\n        }\n      ]\n    },\n    {\n      \"id\": \"iam-readonly-billing-policy\",\n      \"type\": \"iam-policy\",\n      \"action\": \"aws-portal:ViewBilling\",\n      \"resource\": \"arn:aws:billing:::billing-report\"\n    },\n    {\n      \"id\": \"rds-internal-inventory-db\",\n      \"type\": \"database\",\n      \"publiclyAccessible\": false\n    },\n    {\n      \"id\": \"cloudtrail-security-events\",\n      \"type\": \"cloudtrail\",\n      \"enabled\": true\n    },\n    {\n      \"id\": \"ebs-encrypted-root-vol\",\n      \"type\": \"ebs\",\n      \"encrypted\": true\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/scan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scan"
+              ]
+            },
+            "description": "Submits a hardened, fully compliant cloud infrastructure inventory. Demonstrates that properly configured resources trigger 0 security findings."
+          },
+          "response": [
+            {
+              "name": "200 OK - 0 Misconfiguration Findings (Compliant)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"resources\": [\n    {\n      \"id\": \"bucket-hardened-assets\",\n      \"type\": \"s3\",\n      \"publicAccess\": false,\n      \"blockPublicAccess\": true,\n      \"encryptionEnabled\": true\n    },\n    {\n      \"id\": \"sg-secure-web-tier\",\n      \"type\": \"security-group\",\n      \"ingress\": [\n        {\n          \"port\": 443,\n          \"cidr\": \"10.0.0.0/16\"\n        }\n      ]\n    },\n    {\n      \"id\": \"iam-readonly-billing-policy\",\n      \"type\": \"iam-policy\",\n      \"action\": \"aws-portal:ViewBilling\",\n      \"resource\": \"arn:aws:billing:::billing-report\"\n    },\n    {\n      \"id\": \"rds-internal-inventory-db\",\n      \"type\": \"database\",\n      \"publiclyAccessible\": false\n    },\n    {\n      \"id\": \"cloudtrail-security-events\",\n      \"type\": \"cloudtrail\",\n      \"enabled\": true\n    },\n    {\n      \"id\": \"ebs-encrypted-root-vol\",\n      \"type\": \"ebs\",\n      \"encrypted\": true\n    }\n  ]\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/scan",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scan"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"scanId\": \"674312abf98210001a2b3c4e\",\n  \"resourceCount\": 6,\n  \"summary\": {\n    \"total\": 0,\n    \"critical\": 0,\n    \"high\": 0,\n    \"medium\": 0,\n    \"low\": 0\n  },\n  \"findings\": [],\n  \"persistence\": \"saved\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Scan Cloud Infrastructure - Unauthenticated (POST /api/scan)",
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Remove Cookie header to enforce unauthenticated test",
+                  "pm.request.headers.remove('Cookie');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Unauthorized error message is returned', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.eql('Unauthorized');",
+                  "    pm.expect(jsonData.message).to.include('Authentication required');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": [\n    {\n      \"id\": \"bucket-test\",\n      \"type\": \"s3\",\n      \"publicAccess\": true\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/scan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scan"
+              ]
+            },
+            "description": "Verifies that unauthenticated scan attempts are blocked with HTTP 401 Unauthorized by the `requireAuthApi` middleware."
+          },
+          "response": [
+            {
+              "name": "401 Unauthorized - Missing Session",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"resources\":[{\"id\":\"bucket-test\",\"type\":\"s3\",\"publicAccess\":true}]}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/scan",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scan"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"error\": \"Unauthorized\",\n  \"message\": \"Authentication required. Please sign in with Google to access this resource.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Scan Cloud Infrastructure - Empty Array Validation (POST /api/scan)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Validation error message is returned', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.eql('Provide a non-empty resources array.');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resources\": []\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/scan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scan"
+              ]
+            },
+            "description": "Validates backend input defense: submitting an empty resources array (`[]`) returns HTTP 400 Bad Request."
+          },
+          "response": [
+            {
+              "name": "400 Bad Request - Empty Resources Array",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"resources\":[]}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/scan",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scan"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"error\": \"Provide a non-empty resources array.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Retrieve Recent Scan History - Authenticated (GET /api/scans)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.test('Status code is 200 OK', function () {",
+                  "        pm.response.to.have.status(200);",
+                  "    });",
+                  "    ",
+                  "    pm.test('Scan history returned as an array (max 20 records)', function () {",
+                  "        const jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.be.an('array');",
+                  "        pm.expect(jsonData.length).to.be.at.most(20);",
+                  "        ",
+                  "        if (jsonData.length > 0) {",
+                  "            const firstRecord = jsonData[0];",
+                  "            pm.expect(firstRecord._id).to.be.a('string');",
+                  "            pm.expect(firstRecord.createdAt).to.be.a('string');",
+                  "            pm.expect(firstRecord.resourceCount).to.be.a('number');",
+                  "            pm.expect(firstRecord.summary).to.be.an('object');",
+                  "            pm.expect(firstRecord.findings).to.be.an('array');",
+                  "        }",
+                  "    });",
+                  "} else if (pm.response.code === 503) {",
+                  "    pm.test('Status code is 503 Service Unavailable (Database Disconnected)', function () {",
+                  "        pm.response.to.have.status(503);",
+                  "        const jsonData = pm.response.json();",
+                  "        pm.expect(jsonData.error).to.eql('Database is not connected.');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/scans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scans"
+              ]
+            },
+            "description": "Fetches up to 20 most recent scans from MongoDB, sorted newest first, filtered to the authenticated user's email or ID. If MongoDB is unavailable, returns HTTP 503."
+          },
+          "response": [
+            {
+              "name": "200 OK - Historical Scan Records",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/scans",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scans"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "[\n  {\n    \"_id\": \"674312abf98210001a2b3c4d\",\n    \"createdAt\": \"2026-11-24T12:00:00.000Z\",\n    \"resourceCount\": 7,\n    \"summary\": {\n      \"total\": 8,\n      \"critical\": 4,\n      \"high\": 2,\n      \"medium\": 2,\n      \"low\": 0\n    },\n    \"findings\": [\n      {\n        \"ruleId\": \"S3_PUBLIC_ACCESS\",\n        \"resourceId\": \"bucket-customer-uploads\",\n        \"resourceType\": \"s3\",\n        \"title\": \"S3 bucket allows public access\",\n        \"severity\": \"CRITICAL\",\n        \"description\": \"Public bucket access can expose stored data to unauthorised users.\",\n        \"remediation\": \"Enable all S3 Block Public Access settings and review bucket policies and ACLs.\"\n      }\n    ],\n    \"userEmail\": \"auditor@university.edu\",\n    \"userId\": \"673dfa12b984fa001234abcd\"\n  }\n]"
+            },
+            {
+              "name": "503 Service Unavailable - Database Not Connected",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/scans",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scans"
+                  ]
+                }
+              },
+              "status": "Service Unavailable",
+              "code": 503,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"error\": \"Database is not connected.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Retrieve Recent Scan History - Unauthenticated (GET /api/scans)",
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Remove Cookie header to enforce unauthenticated test",
+                  "pm.request.headers.remove('Cookie');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Unauthorized error message is returned', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.eql('Unauthorized');",
+                  "    pm.expect(jsonData.message).to.include('Authentication required');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/scans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "scans"
+              ]
+            },
+            "description": "Verifies that unauthenticated attempts to view scan history are rejected with HTTP 401 Unauthorized."
+          },
+          "response": [
+            {
+              "name": "401 Unauthorized - No Active Session",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/scans",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "scans"
+                  ]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"error\": \"Unauthorized\",\n  \"message\": \"Authentication required. Please sign in with Google to access this resource.\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
