@@ -11,7 +11,7 @@
 **Primary Language & Framework:** JavaScript (Node.js 22 LTS, Express.js 4)  
 **Database:** MongoDB 7  
 **Gateway & Transport:** Nginx Alpine (Dual HTTP/HTTPS Reverse Proxy)  
-**Authentication:** Google OAuth 2.0 (OpenID Connect) with CSRF Protection & Session Fixation Mitigation  
+**Authentication:** Google OAuth 2.0 (OpenID Connect) with CSRF Protection & Session Fixation Mitigation
 
 ---
 
