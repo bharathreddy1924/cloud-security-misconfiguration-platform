@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const path = require('path');
 const session = require('express-session');
+const { MongoStore } = require('connect-mongo');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 const { scanResources } = require('./src/scanner');
@@ -71,7 +72,39 @@ if (process.env.COOKIE_SECURE === 'true') {
   cookieSecure = 'auto';
 }
 
-app.use(session({
+/**
+ * Creates the Express session store.
+ * Uses MongoDB (connect-mongo) in production and fails fast if MONGODB_URI is missing.
+ * Retains express-session's default MemoryStore in development and test environments.
+ */
+function createSessionStore(
+  env = process.env.NODE_ENV,
+  mongoUri,
+  storeFactory = MongoStore
+) {
+  const resolvedMongoUri = arguments.length >= 2 ? mongoUri : process.env.MONGODB_URI;
+  if (env === 'production') {
+    if (!resolvedMongoUri || typeof resolvedMongoUri !== 'string' || !resolvedMongoUri.trim()) {
+      throw new Error('FATAL: MONGODB_URI must be configured in production for MongoDB session storage.');
+    }
+    const store = storeFactory.create({
+      mongoUrl: resolvedMongoUri.trim(),
+      collectionName: 'sessions',
+      ttl: 86400 // 24 hours
+    });
+    if (store && store.collectionP && typeof store.collectionP.catch === 'function') {
+      store.collectionP.catch((err) => {
+        console.error('MongoDB session store connection error:', err.message);
+      });
+    }
+    return store;
+  }
+  return undefined;
+}
+
+const sessionStore = createSessionStore();
+
+const sessionOptions = {
   name: 'cloudsec.sid',
   secret: SESSION_SECRET,
   resave: false,
@@ -82,7 +115,13 @@ app.use(session({
     sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
-}));
+};
+
+if (sessionStore) {
+  sessionOptions.store = sessionStore;
+}
+
+app.use(session(sessionOptions));
 
 // MongoDB Scan Schema (with optional user attribution)
 const Scan = mongoose.models.Scan || mongoose.model('Scan', new mongoose.Schema({
@@ -921,3 +960,5 @@ module.exports.Scan = Scan;
 module.exports.User = User;
 module.exports.swaggerSpec = swaggerSpec;
 module.exports.validateSessionSecret = validateSessionSecret;
+module.exports.createSessionStore = createSessionStore;
+module.exports.sessionStore = sessionStore;
