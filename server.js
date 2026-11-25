@@ -123,9 +123,13 @@ if (sessionStore) {
 
 app.use(session(sessionOptions));
 
-// MongoDB Scan Schema (with optional user attribution)
+// MongoDB Scan Schema (with optional user attribution and metadata)
 const Scan = mongoose.models.Scan || mongoose.model('Scan', new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: null },
+  name: { type: String, trim: true, maxlength: 120, default: '' },
+  environment: { type: String, trim: true, maxlength: 50, default: '' },
+  notes: { type: String, trim: true, maxlength: 1000, default: '' },
   resourceCount: Number,
   findings: Array,
   summary: Object,
@@ -294,6 +298,10 @@ const swaggerOptions = {
           properties: {
             _id: { type: 'string', example: '673dfa12b984fa001234abcd' },
             createdAt: { type: 'string', format: 'date-time', example: '2026-11-21T10:00:00.000Z' },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true, example: '2026-11-25T12:00:00.000Z' },
+            name: { type: 'string', example: 'Production AWS Baseline' },
+            environment: { type: 'string', example: 'production' },
+            notes: { type: 'string', example: 'Remediation ticket SEC-142 created for SSH exposure.' },
             resourceCount: { type: 'integer', example: 6 },
             findings: {
               type: 'array',
@@ -302,6 +310,24 @@ const swaggerOptions = {
             summary: { $ref: '#/components/schemas/ScanSummary' },
             userEmail: { type: 'string', nullable: true, example: 'auditor@university.edu' },
             userId: { type: 'string', nullable: true, example: '673dfa12b984fa001234abcd' }
+          }
+        },
+        ScanMetadataUpdateRequest: {
+          type: 'object',
+          description: 'Partial metadata update payload. Only name, environment, and notes are editable; protected and server-controlled fields (updatedAt, createdAt, findings, summary, resourceCount, userId, userEmail) are rejected.',
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            name: { type: 'string', maxLength: 120, example: 'Production AWS Baseline' },
+            environment: { type: 'string', maxLength: 50, example: 'production' },
+            notes: { type: 'string', maxLength: 1000, example: 'Remediation ticket SEC-142 created for SSH exposure.' }
+          }
+        },
+        DeleteScanResponse: {
+          type: 'object',
+          properties: {
+            deleted: { type: 'boolean', example: true },
+            scanId: { type: 'string', example: '673dfa12b984fa001234abcd' }
           }
         },
         ErrorResponse: {
@@ -886,24 +912,391 @@ app.post('/api/scan', requireAuthApi, async (req, res) => {
  *                   type: string
  *                   example: "Database is not connected."
  */
+const ALLOWED_SCAN_METADATA_LIMITS = {
+  name: 120,
+  environment: 50,
+  notes: 1000
+};
+
+const PROTECTED_SCAN_FIELDS = new Set([
+  'findings',
+  'summary',
+  'userId',
+  'userEmail',
+  'resourceCount',
+  'createdAt',
+  '_id',
+  'id'
+]);
+
+/**
+ * Builds a MongoDB ownership filter matching scans belonging to the session user.
+ * Returns null if the session lacks a non-empty email and id.
+ */
+function buildScanOwnershipFilter(user) {
+  if (!user || typeof user !== 'object') {
+    return null;
+  }
+  const email = typeof user.email === 'string' && user.email.trim() ? user.email.trim() : null;
+  const id = typeof user.id === 'string' && user.id.trim() ? user.id.trim() : null;
+
+  if (!email && !id) {
+    return null;
+  }
+  if (email && id) {
+    return { $or: [{ userEmail: email }, { userId: id }] };
+  }
+  if (email) {
+    return { userEmail: email };
+  }
+  return { userId: id };
+}
+
+/**
+ * Validates that a route parameter is a canonical 24-hex MongoDB ObjectId string.
+ */
+function isValidScanId(id) {
+  return typeof id === 'string' && /^[a-f\d]{24}$/i.test(id) && mongoose.Types.ObjectId.isValid(id);
+}
+
+/**
+ * Validates and sanitizes a PATCH /api/scans/:id metadata payload.
+ * Rejects protected/immutable fields (including updatedAt) and unknown properties.
+ */
+function validateScanMetadataPatch(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { valid: false, error: 'Request body must be a JSON object.' };
+  }
+
+  const keys = Object.keys(body);
+  if (keys.length === 0) {
+    return { valid: false, error: 'Provide at least one metadata field to update: name, environment, or notes.' };
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'updatedAt')) {
+    return { valid: false, error: 'updatedAt is server-controlled and cannot be modified by clients.' };
+  }
+
+  const updates = {};
+  for (const key of keys) {
+    if (PROTECTED_SCAN_FIELDS.has(key)) {
+      return { valid: false, error: `Cannot modify protected scan field: ${key}.` };
+    }
+    if (!Object.prototype.hasOwnProperty.call(ALLOWED_SCAN_METADATA_LIMITS, key)) {
+      return { valid: false, error: `Unsupported field: ${key}. Allowed fields: name, environment, notes.` };
+    }
+
+    const rawValue = body[key];
+    if (typeof rawValue !== 'string') {
+      return { valid: false, error: `${key} must be a string.` };
+    }
+
+    const trimmed = rawValue.trim();
+    const maxLen = ALLOWED_SCAN_METADATA_LIMITS[key];
+    if (trimmed.length > maxLen) {
+      return { valid: false, error: `${key} must not exceed ${maxLen} characters.` };
+    }
+
+    updates[key] = trimmed;
+  }
+
+  updates.updatedAt = new Date();
+  return { valid: true, updates };
+}
+
+/**
+ * Shared guard for individual scan operations: verifies user identity,
+ * scan ObjectId format, and MongoDB connection readiness.
+ */
+function prepareOwnedScanRequest(req, res) {
+  const ownerFilter = buildScanOwnershipFilter(req.session && req.session.user);
+  if (!ownerFilter) {
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Authentication required. Please sign in with Google to access this resource.'
+    });
+    return null;
+  }
+
+  if (!isValidScanId(req.params.id)) {
+    res.status(400).json({ error: 'Invalid scan ID.' });
+    return null;
+  }
+
+  return ownerFilter;
+}
+
 app.get('/api/scans', requireAuthApi, async (req, res) => {
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({ error: 'Database is not connected.' });
   }
-  const user = req.session && req.session.user;
-  if (!user || (!user.email && !user.id)) {
+  const ownerFilter = buildScanOwnershipFilter(req.session && req.session.user);
+  if (!ownerFilter) {
     return res.json([]);
   }
-  const filter = {};
-  if (user.email && user.id) {
-    filter.$or = [{ userEmail: user.email }, { userId: user.id }];
-  } else if (user.email) {
-    filter.userEmail = user.email;
-  } else if (user.id) {
-    filter.userId = user.id;
-  }
-  const scans = await Scan.find(filter).sort({ createdAt: -1 }).limit(20).lean();
+  const scans = await Scan.find(ownerFilter).sort({ createdAt: -1 }).limit(20).lean();
   res.json(scans);
+});
+
+/**
+ * @openapi
+ * /api/scans/{id}:
+ *   get:
+ *     summary: Retrieve a single scan record by ID
+ *     description: Fetches a specific cloud security scan record belonging to the authenticated user. Returns 404 if the scan does not exist or belongs to another user.
+ *     tags:
+ *       - Scanner
+ *     security:
+ *       - CookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: MongoDB ObjectId of the scan record.
+ *         schema:
+ *           type: string
+ *           example: "673dfa12b984fa001234abcd"
+ *     responses:
+ *       200:
+ *         description: Matching scan record
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ScanRecord'
+ *       400:
+ *         description: Invalid scan ID format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Invalid scan ID."
+ *       401:
+ *         description: Unauthorized - Session cookie missing or invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Scan record not found or not owned by authenticated user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               error: "Not Found"
+ *               message: "Scan record not found."
+ *       503:
+ *         description: Database not connected
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Database is not connected."
+ *   patch:
+ *     summary: Update scan metadata (name, environment, notes)
+ *     description: Partially updates metadata fields (`name`, `environment`, `notes`) on an existing scan owned by the authenticated user. Protected and server-controlled fields (`findings`, `summary`, `userId`, `userEmail`, `updatedAt`, `createdAt`) cannot be modified by clients.
+ *     tags:
+ *       - Scanner
+ *     security:
+ *       - CookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: MongoDB ObjectId of the scan record to update.
+ *         schema:
+ *           type: string
+ *           example: "673dfa12b984fa001234abcd"
+ *     requestBody:
+ *       required: true
+ *       description: Allowed metadata fields to update.
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ScanMetadataUpdateRequest'
+ *     responses:
+ *       200:
+ *         description: Updated scan record
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ScanRecord'
+ *       400:
+ *         description: Invalid scan ID, disallowed/server-controlled field, or invalid metadata payload
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "updatedAt is server-controlled and cannot be modified by clients."
+ *       401:
+ *         description: Unauthorized - Session cookie missing or invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Scan record not found or not owned by authenticated user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               error: "Not Found"
+ *               message: "Scan record not found."
+ *       503:
+ *         description: Database not connected
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Database is not connected."
+ *   delete:
+ *     summary: Delete a scan record by ID
+ *     description: Permanently deletes a specific cloud security scan record owned by the authenticated user. Returns 404 if the scan does not exist or belongs to another user.
+ *     tags:
+ *       - Scanner
+ *     security:
+ *       - CookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: MongoDB ObjectId of the scan record to delete.
+ *         schema:
+ *           type: string
+ *           example: "673dfa12b984fa001234abcd"
+ *     responses:
+ *       200:
+ *         description: Scan deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DeleteScanResponse'
+ *       400:
+ *         description: Invalid scan ID format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Invalid scan ID."
+ *       401:
+ *         description: Unauthorized - Session cookie missing or invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Scan record not found or not owned by authenticated user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               error: "Not Found"
+ *               message: "Scan record not found."
+ *       503:
+ *         description: Database not connected
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Database is not connected."
+ */
+app.get('/api/scans/:id', requireAuthApi, async (req, res) => {
+  const ownerFilter = prepareOwnedScanRequest(req, res);
+  if (!ownerFilter) return;
+
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Database is not connected.' });
+  }
+
+  try {
+    const scan = await Scan.findOne({ _id: req.params.id, ...ownerFilter }).lean();
+    if (!scan) {
+      return res.status(404).json({ error: 'Not Found', message: 'Scan record not found.' });
+    }
+    return res.json(scan);
+  } catch (error) {
+    console.error('Scan lookup error:', error.message);
+    const detail = process.env.NODE_ENV === 'production'
+      ? 'An error occurred while retrieving the scan record.'
+      : error.message;
+    return res.status(500).json({ error: 'Failed to retrieve scan.', detail });
+  }
+});
+
+app.patch('/api/scans/:id', requireAuthApi, async (req, res) => {
+  const ownerFilter = prepareOwnedScanRequest(req, res);
+  if (!ownerFilter) return;
+
+  const validation = validateScanMetadataPatch(req.body);
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Database is not connected.' });
+  }
+
+  try {
+    const updatedScan = await Scan.findOneAndUpdate(
+      { _id: req.params.id, ...ownerFilter },
+      { $set: validation.updates },
+      { new: true, runValidators: true }
+    ).lean();
+
+    if (!updatedScan) {
+      return res.status(404).json({ error: 'Not Found', message: 'Scan record not found.' });
+    }
+    return res.json(updatedScan);
+  } catch (error) {
+    console.error('Scan update error:', error.message);
+    const detail = process.env.NODE_ENV === 'production'
+      ? 'An error occurred while updating the scan record.'
+      : error.message;
+    return res.status(500).json({ error: 'Failed to update scan.', detail });
+  }
+});
+
+app.delete('/api/scans/:id', requireAuthApi, async (req, res) => {
+  const ownerFilter = prepareOwnedScanRequest(req, res);
+  if (!ownerFilter) return;
+
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Database is not connected.' });
+  }
+
+  try {
+    const deletedScan = await Scan.findOneAndDelete({ _id: req.params.id, ...ownerFilter }).lean();
+    if (!deletedScan) {
+      return res.status(404).json({ error: 'Not Found', message: 'Scan record not found.' });
+    }
+    return res.json({ deleted: true, scanId: String(deletedScan._id) });
+  } catch (error) {
+    console.error('Scan deletion error:', error.message);
+    const detail = process.env.NODE_ENV === 'production'
+      ? 'An error occurred while deleting the scan record.'
+      : error.message;
+    return res.status(500).json({ error: 'Failed to delete scan.', detail });
+  }
 });
 
 // Structured JSON 404 handler for unknown API routes
@@ -962,3 +1355,6 @@ module.exports.swaggerSpec = swaggerSpec;
 module.exports.validateSessionSecret = validateSessionSecret;
 module.exports.createSessionStore = createSessionStore;
 module.exports.sessionStore = sessionStore;
+module.exports.buildScanOwnershipFilter = buildScanOwnershipFilter;
+module.exports.isValidScanId = isValidScanId;
+module.exports.validateScanMetadataPatch = validateScanMetadataPatch;

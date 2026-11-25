@@ -85,6 +85,22 @@ test('OpenAPI specification documents all production API endpoints', async () =>
   assert.ok(spec.paths['/auth/logout'], '/auth/logout must be documented');
   assert.ok(spec.paths['/auth/logout'].get, 'GET /auth/logout must exist');
   assert.ok(spec.paths['/auth/logout'].post, 'POST /auth/logout must exist');
+
+  // 7. Individual scan endpoints (Phase 1: GET, PATCH, DELETE; PUT deferred)
+  assert.ok(spec.paths['/api/scans/{id}'], '/api/scans/{id} must be documented');
+  assert.ok(spec.paths['/api/scans/{id}'].get, 'GET /api/scans/{id} operation must exist');
+  assert.ok(spec.paths['/api/scans/{id}'].patch, 'PATCH /api/scans/{id} operation must exist');
+  assert.ok(spec.paths['/api/scans/{id}'].delete, 'DELETE /api/scans/{id} operation must exist');
+  assert.equal(spec.paths['/api/scans/{id}'].put, undefined, 'PUT /api/scans/{id} must not be implemented in Phase 1');
+
+  // 8. Scan metadata schemas
+  const scanRecordProps = spec.components?.schemas?.ScanRecord?.properties || {};
+  assert.ok(scanRecordProps.name, 'ScanRecord schema must include name');
+  assert.ok(scanRecordProps.environment, 'ScanRecord schema must include environment');
+  assert.ok(scanRecordProps.notes, 'ScanRecord schema must include notes');
+  assert.ok(scanRecordProps.updatedAt, 'ScanRecord schema must include updatedAt');
+  assert.ok(spec.components?.schemas?.ScanMetadataUpdateRequest, 'ScanMetadataUpdateRequest schema must exist');
+  assert.ok(spec.components?.schemas?.DeleteScanResponse, 'DeleteScanResponse schema must exist');
 });
 
 test('OpenAPI specification documents session cookie authentication (cloudsec.sid)', async () => {
@@ -110,6 +126,20 @@ test('OpenAPI specification documents session cookie authentication (cloudsec.si
   const authMeGet = spec.paths['/api/auth/me']?.get;
   assert.ok(authMeGet.security, 'GET /api/auth/me must specify security requirement');
   assert.ok(authMeGet.security.some((s) => 'CookieAuth' in s), 'GET /api/auth/me requires CookieAuth');
+
+  for (const method of ['get', 'patch', 'delete']) {
+    const op = spec.paths['/api/scans/{id}']?.[method];
+    assert.ok(op, `${method.toUpperCase()} /api/scans/{id} operation must exist`);
+    assert.ok(op.security, `${method.toUpperCase()} /api/scans/{id} must specify security requirement`);
+    assert.ok(
+      op.security.some((s) => 'CookieAuth' in s),
+      `${method.toUpperCase()} /api/scans/{id} requires CookieAuth`
+    );
+    assert.ok(
+      Array.isArray(op.parameters) && op.parameters.some((p) => p.in === 'path' && p.name === 'id' && p.required),
+      `${method.toUpperCase()} /api/scans/{id} must require path param id`
+    );
+  }
 });
 
 test('OpenAPI specification documents all 8 cloud security scanning rules', async () => {
@@ -161,6 +191,22 @@ test('Protected API endpoints remain protected despite public Swagger documentat
 
   const scansRes = await fetch(`${baseUrl}/api/scans`);
   assert.equal(scansRes.status, 401);
+
+  const validSampleId = '507f1f77bcf86cd799439011';
+  const scanByIdGet = await fetch(`${baseUrl}/api/scans/${validSampleId}`);
+  assert.equal(scanByIdGet.status, 401);
+
+  const scanByIdPatch = await fetch(`${baseUrl}/api/scans/${validSampleId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Unauthorized Update' })
+  });
+  assert.equal(scanByIdPatch.status, 401);
+
+  const scanByIdDelete = await fetch(`${baseUrl}/api/scans/${validSampleId}`, {
+    method: 'DELETE'
+  });
+  assert.equal(scanByIdDelete.status, 401);
 
   const meRes = await fetch(`${baseUrl}/api/auth/me`);
   assert.equal(meRes.status, 401);
